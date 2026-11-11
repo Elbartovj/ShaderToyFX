@@ -1,0 +1,12 @@
+<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Installer le bouton ShaderToyFX</title>
+<style>body{font-family:Segoe UI,sans-serif;background:#1b1b1b;color:#ddd;max-width:720px;margin:40px auto;line-height:1.6}
+a.bm{display:inline-block;background:#3973b8;color:#fff;padding:12px 22px;border-radius:6px;font-size:20px;text-decoration:none;cursor:grab}
+kbd{background:#333;padding:2px 6px;border-radius:3px} li{margin-bottom:10px}</style></head><body>
+<h1>Bouton « → ShaderToyFX »</h1>
+<ol>
+<li>Affiche la barre de favoris de ton navigateur : appuie sur <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>B</kbd>.</li>
+<li><b>Fais glisser</b> ce bouton bleu (clic maintenu) jusque dans la barre de favoris, puis relâche :<br><br>
+<a class="bm" href="javascript:(async()=&gt;{try{const m=location.pathname.match(/\/(?:view|embed)\/(\w{6})/);if(!m){alert(&#x27;ShaderToyFX : ouvre d\&#x27;abord un shader (shadertoy.com/view/...)&#x27;);return;}const id=m[1];const r=await fetch(&#x27;/shadertoy&#x27;,{method:&#x27;POST&#x27;,headers:{&#x27;Content-Type&#x27;:&#x27;application/x-www-form-urlencoded&#x27;},body:&#x27;s=&#x27;+encodeURIComponent(JSON.stringify({shaders:[id]}))+&#x27;&amp;nt=1&amp;nl=1&amp;np=1&#x27;});const j=await r.json();const s=Array.isArray(j)?j[0]:j;if(!s||!s.renderpass)throw new Error(&#x27;réponse inattendue du site&#x27;);const n=((s.info&amp;&amp;s.info.name)||id).replace(/[\\/:*?&quot;&lt;&gt;|]/g,&#x27;_&#x27;);const a=document.createElement(&#x27;a&#x27;);a.href=URL.createObjectURL(new Blob([JSON.stringify(s)],{type:&#x27;application/json&#x27;}));a.download=n+&#x27; [&#x27;+id+&#x27;].json&#x27;;document.body.appendChild(a);a.click();a.remove();}catch(e){alert(&#x27;ShaderToyFX : export impossible (&#x27;+e.message+&#x27;). Copie le code dans l\&#x27;onglet FICHIER.&#x27;);}})();" onclick="alert('Ne clique pas ici : fais-le glisser dans ta barre de favoris.');return false;">→ ShaderToyFX</a><br><br></li>
+<li>Va sur <a href="https://www.shadertoy.com" style="color:#8bf">shadertoy.com</a>, ouvre un shader qui te plaît.</li>
+<li>Clique sur <b>→ ShaderToyFX</b> dans ta barre de favoris. Un fichier .json se télécharge, et le shader apparaît dans Resolume (la fenêtre Browse Library doit avoir été ouverte au moins une fois).</li>
+</ol></body></html>

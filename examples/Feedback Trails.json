@@ -1,0 +1,20 @@
+{
+	"info": { "id": "", "name": "Feedback Trails", "username": "ShaderToyFX", "description": "Exemple multi-passes : Buffer A garde une traînée de l'entrée Resolume." },
+	"renderpass": [
+		{
+			"type": "buffer", "name": "Buffer A",
+			"inputs": [
+				{ "id": "4dXGR8", "ctype": "buffer", "channel": 0, "src": "/media/previz/buffer00.png", "sampler": { "filter": "linear", "wrap": "clamp", "vflip": "true" } },
+				{ "id": "in0", "ctype": "video", "channel": 1, "src": "", "sampler": { "filter": "linear", "wrap": "clamp", "vflip": "true" } }
+			],
+			"outputs": [ { "id": "4dXGR8", "channel": 0 } ],
+			"code": "uniform float decay; // 0.8 0.995 0.95\nuniform float drift; // 0 4 1\n\nvoid mainImage( out vec4 o, in vec2 f )\n{\n    vec2 uv = f / iResolution.xy;\n    vec2 c = uv - 0.5;\n    vec2 prevUv = 0.5 + c * ( 1.0 - 0.004 * drift ) + 0.002 * drift * vec2( sin( iTime ), cos( iTime * 0.7 ) );\n    vec4 prev = texture( iChannel0, prevUv ) * decay;\n    vec4 src = texture( iChannel1, uv );\n    o = max( prev, src );\n    if( iFrame == 0 ) o = src;\n}"
+		},
+		{
+			"type": "image", "name": "Image",
+			"inputs": [ { "id": "4dXGR8", "ctype": "buffer", "channel": 0, "src": "/media/previz/buffer00.png", "sampler": { "filter": "linear", "wrap": "clamp", "vflip": "true" } } ],
+			"outputs": [ { "id": "4sXGRn", "channel": 0 } ],
+			"code": "void mainImage( out vec4 fragColor, in vec2 fragCoord )\n{\n    fragColor = texture( iChannel0, fragCoord / iResolution.xy );\n}"
+		}
+	]
+}

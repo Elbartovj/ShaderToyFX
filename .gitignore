@@ -1,0 +1,16 @@
+build/
+build-*/
+out/
+*.dll
+*.exe
+*.obj
+*.o
+*.pdb
+.vs/
+.vscode/
+CMakeUserPresets.json
+tests/gltest
+tests/paramtest
+tests/excheck
+tests/apitest
+tests/lictest
