@@ -54,6 +54,8 @@ std::vector< std::string > FindDownloadedExports();
 // Code JavaScript du bookmarklet (à mettre comme URL d'un favori)
 const char* BookmarkletCode();
 
-// Choisit un shader aléatoire (en ligne si clé API, sinon parmi les fichiers locaux)
-bool PickRandomShader( std::string& path, std::string& title, std::string& err );
+// Source du tirage aléatoire : "" = toute la bibliothèque locale, kRandomOnline = Shadertoy (clé API),
+// sinon un dossier relatif à Documents\ShaderToyFX (sous-dossiers compris)
+extern const char* const kRandomOnline;
+bool PickRandomShader( const std::string& source, const std::string& excludePath, std::string& path, std::string& title, std::string& err );
 }//namespace stfx

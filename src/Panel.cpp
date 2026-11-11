@@ -511,7 +511,7 @@ void TabShadertoy( HWND )
 	{
 		if( SharedPtr t = Target() )
 		{
-			RequestRandom( t );
+			RequestRandom( t, Trim( g_ui->settings.apiKey ).empty() ? std::string() : std::string( kRandomOnline ) );
 			Toast( "Shader aléatoire demandé…" );
 		}
 	}
@@ -895,6 +895,25 @@ void TabLocal()
 	ImGui::SameLine();
 	if( ImGui::Button( "Actualiser" ) )
 		g_ui->localDirty = true;
+	ImGui::SameLine();
+	{
+		std::string src = g_ui->folderFilter == "*" ? std::string() : g_ui->folderFilter;
+		std::string lbl = src.empty() ? "Aléatoire (tout)" : "Aléatoire dans « " + src + " »";
+		if( ImGui::Button( lbl.c_str() ) )
+		{
+			if( SharedPtr t = Target() )
+			{
+				RequestRandom( t, src );
+				Toast( lbl + "…" );
+			}
+		}
+		if( ImGui::BeginItemTooltip() )
+		{
+			ImGui::TextUnformatted( "Charge un shader au hasard dans le dossier sélectionné à gauche (sous-dossiers compris).\n"
+									"Dans Resolume, le réglage « Random From » fait la même chose pour le bouton Random Shadertoy." );
+			ImGui::EndTooltip();
+		}
+	}
 	ImGui::SameLine();
 	if( ImGui::Button( "Ouvrir le dossier" ) )
 		OpenInExplorer( g_ui->folderFilter == "*" || g_ui->folderFilter.empty() ? RootDir() : JoinPath( RootDir(), g_ui->folderFilter ) );

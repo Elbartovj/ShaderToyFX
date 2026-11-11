@@ -6,6 +6,7 @@
 #include <regex>
 #include <mutex>
 #include <ctime>
+#include <algorithm>
 #include <filesystem>
 
 #ifdef _WIN32
@@ -328,43 +329,52 @@ const char* BookmarkletCode()
 		   "}catch(e){alert('ShaderToyFX : export impossible ('+e.message+'). Copie le code dans l\\'onglet FICHIER.');}})();";
 }
 
-bool PickRandomShader( std::string& path, std::string& title, std::string& err )
+const char* const kRandomOnline = "*online*";
+
+bool PickRandomShader( const std::string& source, const std::string& excludePath, std::string& path, std::string& title, std::string& err )
 {
 	Settings st = GetSettings();
-	if( !Trim( st.apiKey ).empty() )
+	if( source == kRandomOnline )
 	{
-		std::vector< std::string > ids;
-		if( ApiListAll( st.apiKey, ids, err ) )
+		if( Trim( st.apiKey ).empty() )
 		{
-			for( int attempt = 0; attempt < 6; ++attempt )
-			{
-				const std::string& id = ids[ RandomU32() % ids.size() ];
-				ShaderSummary s;
-				std::string e;
-				if( !ApiGetShader( id, st.apiKey, s, e ) )
-				{
-					err = e;
-					continue;
-				}
-				if( st.skipUnsupported && ( ( s.hasSoundPass && s.passes == 2 ) || s.hasCubePass ) )
-					continue;
-				path  = SaveToCache( s );
-				title = s.name;
-				return true;
-			}
+			err = "Random « Shadertoy en ligne » : il faut une clé API (Préférences). Choisis plutôt un dossier.";
 			return false;
 		}
+		std::vector< std::string > ids;
+		if( !ApiListAll( st.apiKey, ids, err ) )
+			return false;
+		for( int attempt = 0; attempt < 6; ++attempt )
+		{
+			const std::string& id = ids[ RandomU32() % ids.size() ];
+			ShaderSummary s;
+			std::string e;
+			if( !ApiGetShader( id, st.apiKey, s, e ) )
+			{
+				err = e;
+				continue;
+			}
+			if( st.skipUnsupported && ( ( s.hasSoundPass && s.passes == 2 ) || s.hasCubePass ) )
+				continue;
+			path  = SaveToCache( s );
+			title = s.name;
+			return true;
+		}
+		return false;
 	}
-	// hors-ligne / sans clé : tirage parmi les fichiers déjà présents
-	auto files = ListShaderFiles( RootDir() );
+
+	// tirage local : toute la bibliothèque ou un dossier (sous-dossiers compris)
+	std::string dir = source.empty() ? RootDir() : JoinPath( RootDir(), source );
+	auto files      = ListShaderFiles( dir );
 	std::vector< LocalEntry > valid;
 	for( auto& f : files )
 		if( f.name.rfind( "_", 0 ) != 0 )
 			valid.push_back( f );
+	if( valid.size() > 1 && !excludePath.empty() )
+		valid.erase( std::remove_if( valid.begin(), valid.end(), [ & ]( const LocalEntry& f ) { return ToLower( f.path ) == ToLower( excludePath ); } ), valid.end() );
 	if( valid.empty() )
 	{
-		if( err.empty() )
-			err = "Aucun shader local et pas de clé API pour en télécharger.";
+		err = source.empty() ? "La bibliothèque est vide : importe d'abord des shaders." : "Le dossier « " + source + " » ne contient aucun shader.";
 		return false;
 	}
 	auto& f = valid[ RandomU32() % valid.size() ];

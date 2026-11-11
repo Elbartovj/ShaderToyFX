@@ -43,7 +43,8 @@ struct InstanceSnapshot
 // Requêtes asynchrones (téléchargement/lecture sur un thread de travail)
 void RequestLoadFile( const SharedPtr& s, const std::string& path, bool userInitiated );
 void RequestLoadShadertoy( const SharedPtr& s, const std::string& id );
-void RequestRandom( const SharedPtr& s );
+// source : voir PickRandomShader ("" = bibliothèque, dossier relatif, ou kRandomOnline)
+void RequestRandom( const SharedPtr& s, const std::string& source );
 void RequestApplyDoc( const SharedPtr& s, ShaderDoc doc, bool userInitiated );
 void RequestRestart( const SharedPtr& s );
 InstanceSnapshot Snapshot( const SharedPtr& s );

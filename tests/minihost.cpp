@@ -113,16 +113,57 @@ int main( int argc, char** argv )
 	for( int i = 0; i < 200; ++i )// attend le chargement asynchrone
 	{
 		frame( 1 );
-		if( DisplayName( inst, 11 ) == "amount" ) break;
+		if( DisplayName( inst, 18 ) != "Param 1" ) break;
 	}
-	printf( "param 11 display name = '%s'\n", DisplayName( inst, 11 ).c_str() );
+	printf( "param 11 display name = '%s'\n", DisplayName( inst, 18 ).c_str() );
 	printf( "param 0 (Shader) = '%s'\n", (const char*)Call( 9, U( 0 ), inst ).PointerValue );
-	SetF( inst, 11, 0.5f );// amount = 1.0 (plage 0..2)
-	SetF( inst, 6 - 2, 0.25f );// Speed 1x
+	SetF( inst, 16, 0.5f );// amount = 1.0 (plage 0..2)
+	SetF( inst, 6, 0.25f );// Speed 1x
 	frame( 10 );
 	pixel( 5, 5, px );
 	printf( "multipass après ~10 images : %d %d %d %d (R augmente avec le feedback)\n", px[ 0 ], px[ 1 ], px[ 2 ], px[ 3 ] );
-	printf( "display speed = %s\n", (const char*)Call( 7, U( 4 ), inst ).PointerValue );
+	printf( "display speed = %s\n", (const char*)Call( 7, U( 6 ), inst ).PointerValue );
+
+	// Auto Mask : on, luminance, seuil 0.5
+	SetF( inst, 13, 1.0f );
+	SetF( inst, 15, 0.5f );
+	SetF( inst, 16, 0.0f );
+	frame( 2 );
+	pixel( 5, 5, px );
+	printf( "auto mask (luma faible) : alpha = %d (attendu 0)\n", px[ 3 ] );
+	SetF( inst, 17, 1.0f );
+	frame( 2 );
+	pixel( 5, 5, px );
+	printf( "auto mask inversé : alpha = %d (attendu 255)\n", px[ 3 ] );
+
+	printf( "sliders :" );
+	for( int i = 18; i < 28; ++i )
+		printf( " [%s=%s]", DisplayName( inst, i ).c_str(), (const char*)Call( 7, U( i ), inst ).PointerValue );
+	printf( "\n" );
+	SetF( inst, 13, 0.0f );// mask off
+	frame( 2 );
+	pixel( 5, 5, px );
+	printf( "rouge avant = %d\n", px[ 0 ] );
+	SetF( inst, 20, 0.0f );// 3e slider (TINT.r pour params.glsl) à 0
+	frame( 2 );
+	pixel( 5, 5, px );
+	printf( "rouge après TINT.r=0 : %d\n", px[ 0 ] );
+
+	// Random From = dossier Techno (index 4 : Bibliothèque, Ambient, Local, Shadertoy, Techno)
+	SetF( inst, 3, 4.0f );
+	printf( "Random Folder (texte caché) = '%s'\n", (const char*)Call( 9, U( 4 ), inst ).PointerValue );
+	for( int k = 0; k < 4; ++k )
+	{
+		SetF( inst, 2, 1.0f );
+		SetF( inst, 2, 0.0f );
+		std::string before = (const char*)Call( 9, U( 0 ), inst ).PointerValue;
+		for( int i = 0; i < 200; ++i )
+		{
+			frame( 1 );
+			if( before != (const char*)Call( 9, U( 0 ), inst ).PointerValue ) break;
+		}
+		printf( "random %d -> %s\n", k, (const char*)Call( 9, U( 0 ), inst ).PointerValue );
+	}
 
 	if( waitPanel )
 	{

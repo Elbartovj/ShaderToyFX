@@ -1,6 +1,7 @@
 #include "Plugin.h"
 #include "Panel.h"
 #include "Util.h"
+#include "ShadertoyApi.h"
 #include <ffgl/FFGLLog.h>
 #include <ctime>
 #include <cstring>
@@ -44,9 +45,15 @@ ShaderToyFX::ShaderToyFX()
 	SetParamInfo( PT_BROWSE, "Browse Library", FF_TYPE_EVENT, false );
 	SetParamInfo( PT_RANDOM, "Random Shadertoy", FF_TYPE_EVENT, false );
 	SetParamInfo( PT_RESTART, "Restart", FF_TYPE_EVENT, false );
+	SetOptionParamInfo( PT_RANDOM_FROM, "Random From", 1, 0.0f );
+	SetParamElementInfo( PT_RANDOM_FROM, 0, "Bibliothèque (tout)", 0.0f );
+	SetParamInfo( PT_RANDOM_FOLDER, "Random Folder", FF_TYPE_TEXT, "" );
+	SetParamVisibility( PT_RANDOM_FOLDER, false, false );
 	SetParamGroup( PT_SHADER, "Load" );
 	SetParamGroup( PT_BROWSE, "Load" );
 	SetParamGroup( PT_RANDOM, "Load" );
+	SetParamGroup( PT_RANDOM_FROM, "Load" );
+	SetParamGroup( PT_RANDOM_FOLDER, "Load" );
 	SetParamGroup( PT_RESTART, "Load" );
 
 	SetParamInfo( PT_SPEED, "Speed", FF_TYPE_STANDARD, 0.25f );// 0..4, défaut 1
@@ -93,6 +100,56 @@ ShaderToyFX::ShaderToyFX()
 		values[ PT_USER0 + i ] = 0.5f;
 
 	shared = std::make_shared< InstanceShared >();
+	RefreshRandomSources( true, false );
+}
+
+std::string ShaderToyFX::RandomSource() const
+{
+	return randomFolder;
+}
+
+// Met à jour la liste « Random From » (dossiers de la bibliothèque) en gardant le choix par son nom
+void ShaderToyFX::RefreshRandomSources( bool force, bool raiseEvents )
+{
+	auto now = std::chrono::steady_clock::now();
+	if( !force && now - lastFolderScan < std::chrono::seconds( 3 ) )
+		return;
+	lastFolderScan = now;
+
+	std::vector< std::string > sources = { "" };
+	if( !Trim( GetSettings().apiKey ).empty() )
+		sources.push_back( kRandomOnline );
+	for( auto& f : ListFolders() )
+		sources.push_back( f );
+	// un dossier choisi mais absent (renommé ?) reste dans la liste pour ne pas perdre le réglage
+	if( !randomFolder.empty() && std::find( sources.begin(), sources.end(), randomFolder ) == sources.end() )
+		sources.push_back( randomFolder );
+
+	bool changed = sources != randomSources;
+	if( changed )
+	{
+		randomSources = sources;
+		std::vector< std::string > names;
+		std::vector< float > vals;
+		for( size_t i = 0; i < sources.size(); ++i )
+		{
+			const std::string& src = sources[ i ];
+			names.push_back( src.empty() ? "Bibliothèque (tout)" : src == kRandomOnline ? "Shadertoy en ligne" : src );
+			vals.push_back( (float)i );
+		}
+		SetParamElements( PT_RANDOM_FROM, names, vals, raiseEvents );
+	}
+	// l'index affiché suit le nom mémorisé
+	auto it   = std::find( randomSources.begin(), randomSources.end(), randomFolder );
+	float idx = it == randomSources.end() ? 0.0f : (float)( it - randomSources.begin() );
+	if( it == randomSources.end() )
+		randomFolder.clear();
+	if( values[ PT_RANDOM_FROM ] != idx )
+	{
+		values[ PT_RANDOM_FROM ] = idx;
+		if( raiseEvents )
+			RaiseParamEvent( PT_RANDOM_FROM, FF_EVENT_FLAG_VALUE );
+	}
 }
 
 ShaderToyFX::~ShaderToyFX()
@@ -237,6 +294,7 @@ FFResult ShaderToyFX::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 		return FF_FAIL;
 
 	ApplyPending();
+	RefreshRandomSources( false, true );
 
 	// horloge
 	auto now = std::chrono::steady_clock::now();
@@ -334,8 +392,20 @@ FFResult ShaderToyFX::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 
 FFResult ShaderToyFX::SetFloatParameter( unsigned int index, float value )
 {
-	if( index >= PT_COUNT || index == PT_SHADER || index == PT_FFT )
+	if( index >= PT_COUNT || index == PT_SHADER || index == PT_FFT || index == PT_RANDOM_FOLDER )
 		return index == PT_FFT ? FF_SUCCESS : FF_FAIL;
+	if( index == PT_RANDOM_FROM )
+	{
+		values[ index ] = value;
+		size_t i        = (size_t)std::lround( std::max( 0.0f, value ) );
+		std::string sel = i < randomSources.size() ? randomSources[ i ] : std::string();
+		if( sel != randomFolder )
+		{
+			randomFolder = sel;
+			RaiseParamEvent( PT_RANDOM_FOLDER, FF_EVENT_FLAG_VALUE );
+		}
+		return FF_SUCCESS;
+	}
 	bool rising = value > 0.5f && values[ index ] <= 0.5f;
 	if( glReady && index >= PT_USER0 && index < PT_COUNT )
 		userTouched[ index - PT_USER0 ] = true;// (avant InitGL = valeurs par défaut de FFGL : ignorées)
@@ -348,7 +418,7 @@ FFResult ShaderToyFX::SetFloatParameter( unsigned int index, float value )
 		Panel::Open( shared );
 		break;
 	case PT_RANDOM:
-		RequestRandom( shared );
+		RequestRandom( shared, RandomSource() );
 		break;
 	case PT_RESTART:
 		RequestRestart( shared );
@@ -366,6 +436,12 @@ float ShaderToyFX::GetFloatParameter( unsigned int index )
 
 FFResult ShaderToyFX::SetTextParameter( unsigned int index, const char* value )
 {
+	if( index == PT_RANDOM_FOLDER )
+	{
+		randomFolder = value ? value : "";
+		RefreshRandomSources( true, glReady );// recale la liste déroulante sur ce nom
+		return FF_SUCCESS;
+	}
 	if( index != PT_SHADER )
 		return FF_FAIL;
 	std::string path = value ? value : "";
@@ -387,6 +463,8 @@ FFResult ShaderToyFX::SetTextParameter( unsigned int index, const char* value )
 
 char* ShaderToyFX::GetTextParameter( unsigned int index )
 {
+	if( index == PT_RANDOM_FOLDER )
+		return const_cast< char* >( randomFolder.c_str() );
 	if( index != PT_SHADER )
 		return (char*)FF_FAIL;
 	return const_cast< char* >( shaderPath.c_str() );

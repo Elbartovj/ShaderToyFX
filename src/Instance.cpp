@@ -92,12 +92,19 @@ void RequestLoadShadertoy( const SharedPtr& s, const std::string& id )
 	} );
 }
 
-void RequestRandom( const SharedPtr& s )
+void RequestRandom( const SharedPtr& s, const std::string& source )
 {
-	RunAsync( s, "Shader aléatoire…", []( ShaderDoc& doc, std::string& err, bool& user ) {
+	std::string exclude;
+	{
+		std::lock_guard< std::mutex > lock( s->m );
+		if( s->current )
+			exclude = s->current->sourcePath;// évite de retomber sur le shader en cours
+	}
+	std::string label = source.empty() ? "bibliothèque" : source == kRandomOnline ? "Shadertoy" : source;
+	RunAsync( s, "Aléatoire (" + label + ")…", [ source, exclude ]( ShaderDoc& doc, std::string& err, bool& user ) {
 		user = true;
 		std::string path, title;
-		if( !PickRandomShader( path, title, err ) )
+		if( !PickRandomShader( source, exclude, path, title, err ) )
 			return false;
 		return LoadShaderFile( path, doc, err );
 	} );

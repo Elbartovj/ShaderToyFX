@@ -40,7 +40,8 @@ Sans clé, le bouton **Rechercher** ouvre la recherche dans ton navigateur, et *
 |---|---|---|
 | Load | **Shader** | Sélecteur de fichier (`.json`, `.glsl`, `.frag`, `.txt`). Le chemin est enregistré dans la composition. |
 | Load | **Browse Library** | Ouvre la fenêtre *Shader Library*. |
-| Load | **Random Shadertoy** | Charge un shader au hasard : en ligne si une clé API est configurée, sinon parmi tes fichiers locaux. |
+| Load | **Random Shadertoy** | Charge un shader au hasard dans la source choisie avec *Random From*. Ne retombe jamais deux fois de suite sur le même shader. |
+| Load | **Random From** | Source du tirage : *Bibliothèque (tout)*, un de **tes dossiers** (sous-dossiers compris), ou *Shadertoy en ligne* si tu as une clé API. La liste se met à jour quand tu crées un dossier, et le choix est enregistré dans la composition. |
 | Load | **Restart** | Remet `iTime`/`iFrame` à zéro et vide les buffers. |
 | Controls | Speed, Mouse X/Y, Mouse Click | `iTime` × vitesse (0 à 4×) et `iMouse` façon Shadertoy (`zw` positifs quand le bouton est enfoncé). |
 | Controls | Shader Alpha | Désactivé par défaut : alpha = 1 comme sur Shadertoy. Activé : l'alpha du shader est conservé. |
@@ -57,6 +58,7 @@ Sans clé, le bouton **Rechercher** ouvre la recherche dans ton navigateur, et *
   - Colonne de gauche : tes dossiers (*Créer*, *Supprimer* un dossier vide). Glisse un shader sur un dossier pour l'y ranger, ou utilise *Déplacer vers…* ou le clic droit. **Sélection multiple** : Ctrl+clic (ajouter/retirer), Maj+clic (plage), Ctrl+A (tout) ; on glisse alors toute la sélection d'un coup.
   - Colonne **LICENCE** : *Commercial OK* (CC0, domaine public, MIT, BSD…), *Commercial (créditer)* (CC BY, CC BY-SA), *Non commercial* (CC BY-NC…, ou aucune mention sur Shadertoy, la licence par défaut étant CC BY-NC-SA 3.0), *Interdit* (« all rights reserved »…), *À vérifier* (mention ambiguë ou pas de licence dans un shader local). Survole le badge pour voir la ligne du code qui a servi à décider. Le filtre de licence permet de n'afficher que les shaders utilisables commercialement.
   - La détection est **automatique et indicative** : elle lit les commentaires du code et la description. Avant un usage commercial, relis toujours le texte de la licence. Ce n'est pas un avis juridique.
+  - Le bouton **Aléatoire dans « dossier »** charge un shader au hasard dans le dossier sélectionné.
   - Un shader déplacé reste retrouvé par les compositions Resolume existantes (recherche par nom de fichier dans la bibliothèque).
 - **ÉDITEUR** : édition en direct de chaque passe. *Appliquer* (Ctrl+Entrée) recompile sans perdre le shader en cours si une erreur survient. *Enregistrer* (Ctrl+S) écrit le fichier et met à jour le paramètre Shader.
 - **PRÉFÉRENCES** : clé API, nombre de résultats par page, option « toujours au premier plan ».

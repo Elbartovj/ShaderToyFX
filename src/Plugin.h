@@ -12,6 +12,8 @@ enum ParamIndex : unsigned int
 	PT_SHADER = 0,
 	PT_BROWSE,
 	PT_RANDOM,
+	PT_RANDOM_FROM,  // liste déroulante : Bibliothèque / Shadertoy en ligne / dossiers
+	PT_RANDOM_FOLDER,// texte caché : nom du dossier choisi (sauvé dans la composition)
 	PT_RESTART,
 	PT_SPEED,
 	PT_MOUSE_X,
@@ -49,12 +51,17 @@ private:
 	void ApplyPending();
 	void ApplyUserParams( const std::vector< stfx::UserParam >& params, bool resetValues, bool keepHostValues );
 	void ResetClock();
+	void RefreshRandomSources( bool force, bool raiseEvents );
+	std::string RandomSource() const;
 
 	stfx::SharedPtr shared;
 	stfx::Renderer renderer;
 	bool glReady = false;
 
 	std::string shaderPath;
+	std::vector< std::string > randomSources;// "" = bibliothèque, kRandomOnline, dossiers
+	std::string randomFolder;                 // source choisie (persistée)
+	std::chrono::steady_clock::time_point lastFolderScan;
 	float values[ PT_COUNT ] = {};
 	std::vector< stfx::UserParam > userParams;
 	bool firstShaderApplied = false;
