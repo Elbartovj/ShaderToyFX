@@ -26,6 +26,11 @@ static void PinModule()
 #endif
 }
 
+void PinModuleForThreads()
+{
+	PinModule();
+}
+
 template< typename Fn >
 static void RunAsync( const SharedPtr& s, const std::string& status, Fn work )
 {

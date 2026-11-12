@@ -106,6 +106,9 @@ bool ParseShaderSource( const std::string& text, const std::string& pathHint, Sh
 // Charge les images/cubemaps/volumes référencés (cache local, téléchargement si absent)
 void ResolveMedia( ShaderDoc& doc, bool allowDownload );
 
+// Charge une image (png, jpg, bmp, tga, gif, hdr…) en RGBA8, retournée verticalement si vflip
+std::shared_ptr< ImageData > LoadImageFile( const std::string& path, bool vflip, std::string& err );
+
 // Lecture + analyse + médias
 bool LoadShaderFile( const std::string& path, ShaderDoc& doc, std::string& err );
 

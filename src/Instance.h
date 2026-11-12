@@ -50,6 +50,7 @@ void RequestRestart( const SharedPtr& s );
 InstanceSnapshot Snapshot( const SharedPtr& s );
 
 // Registre global des instances vivantes
+void PinModuleForThreads();
 void RegisterInstance( const SharedPtr& s );
 void UnregisterInstance( const SharedPtr& s );
 std::vector< SharedPtr > ListInstances();

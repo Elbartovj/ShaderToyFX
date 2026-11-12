@@ -91,7 +91,35 @@ bool Renderer::InitGL()
 	glBindTexture( GL_TEXTURE_CUBE_MAP, 0 );
 	glBindTexture( GL_TEXTURE_3D, 0 );
 	glPixelStorei( GL_UNPACK_ALIGNMENT, prevUnpack );
+
+	// samplers des canaux remplacés (entrée/audio : linéaire ; image : mipmaps, répétition)
+	glGenSamplers( 1, &linearSampler );
+	glSamplerParameteri( linearSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+	glSamplerParameteri( linearSampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	glSamplerParameteri( linearSampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	glSamplerParameteri( linearSampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	glGenSamplers( 1, &mipSampler );
+	glSamplerParameteri( mipSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+	glSamplerParameteri( mipSampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	glSamplerParameteri( mipSampler, GL_TEXTURE_WRAP_S, GL_REPEAT );
+	glSamplerParameteri( mipSampler, GL_TEXTURE_WRAP_T, GL_REPEAT );
 	return true;
+}
+
+void Renderer::SetChannelImage( int ch, const ImageData* img )
+{
+	if( ch < 0 || ch > 3 )
+		return;
+	if( chImageTex[ ch ] )
+		glDeleteTextures( 1, &chImageTex[ ch ] );
+	chImageTex[ ch ] = 0;
+	chImageW[ ch ] = chImageH[ ch ] = 0;
+	if( !img || img->faces != 1 || img->depth != 1 )
+		return;
+	GLenum target;
+	chImageTex[ ch ] = UploadImage( *img, ChannelKind::Texture, Filter::Mipmap, target );
+	chImageW[ ch ]   = img->width;
+	chImageH[ ch ]   = img->height;
 }
 
 void Renderer::DeInitGL()
@@ -100,6 +128,13 @@ void Renderer::DeInitGL()
 	DestroyBuffers();
 	GLuint t[] = { audioTex, keyboardTex, black2D, blackCube, black3D };
 	glDeleteTextures( 5, t );
+	for( int i = 0; i < 4; ++i )
+		SetChannelImage( i, nullptr );
+	if( linearSampler )
+		glDeleteSamplers( 1, &linearSampler );
+	if( mipSampler )
+		glDeleteSamplers( 1, &mipSampler );
+	linearSampler = mipSampler = 0;
 	audioTex = keyboardTex = black2D = blackCube = black3D = 0;
 	if( vertexShader )
 		glDeleteShader( vertexShader );
@@ -477,6 +512,38 @@ void Renderer::Render( const FrameInputs& in )
 			GLuint tex       = 0;
 			GLenum target    = c.target;
 			float rw = 0, rh = 0, rd = 0;
+			GLuint sampler   = p.samplers[ i ];
+			// remplacement choisi dans Resolume : jamais sur un buffer (feedback) ni sur un sampler cube/3D
+			int mode = in.chMode[ i ];
+			if( mode != CH_SHADER && c.kind != ChannelKind::Buffer && target == GL_TEXTURE_2D )
+			{
+				switch( mode )
+				{
+				case CH_INPUT:
+					tex     = in.inputTex;
+					rw      = (float)in.inputW;
+					rh      = (float)in.inputH;
+					sampler = linearSampler;
+					break;
+				case CH_IMAGE:
+					tex     = chImageTex[ i ];
+					rw      = (float)chImageW[ i ];
+					rh      = (float)chImageH[ i ];
+					sampler = mipSampler;
+					break;
+				case CH_AUDIO:
+					tex     = audioTex;
+					rw      = (float)kAudioSize;
+					rh      = 2;
+					sampler = linearSampler;
+					break;
+				default:
+					break;
+				}
+				if( !tex )
+					tex = black2D;
+			}
+			else
 			switch( c.kind )
 			{
 			case ChannelKind::Input:
@@ -525,7 +592,7 @@ void Renderer::Render( const FrameInputs& in )
 				tex = target == GL_TEXTURE_CUBE_MAP ? blackCube : target == GL_TEXTURE_3D ? black3D : black2D;
 			glActiveTexture( GL_TEXTURE0 + i );
 			glBindTexture( target, tex );
-			glBindSampler( i, p.samplers[ i ] );
+			glBindSampler( i, sampler );
 			if( p.uChannel[ i ] >= 0 )
 				glUniform1i( p.uChannel[ i ], i );
 			chRes[ i * 3 + 0 ] = rw;

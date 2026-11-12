@@ -25,6 +25,20 @@ struct FrameInputs
 	float maskThreshold = 0.05f;
 	float maskSoftness  = 0.15f;
 	bool maskInvert     = false;
+
+	// Remplacement des iChannel depuis les paramètres de l'effet
+	// 0 = celui du shader, 1 = entrée Resolume, 2 = image choisie, 3 = audio, 4 = noir
+	int chMode[ 4 ] = {};
+};
+
+enum ChannelOverride
+{
+	CH_SHADER = 0,
+	CH_INPUT,
+	CH_IMAGE,
+	CH_AUDIO,
+	CH_BLACK,
+	CH_MODE_COUNT
 };
 
 class Renderer
@@ -39,6 +53,8 @@ public:
 	void Render( const FrameInputs& in );
 	void UpdateAudio( const float* fft, int count, float gain );
 	void ResetBuffers();
+	// Image choisie par l'utilisateur pour iChannelN (nullptr = aucune)
+	void SetChannelImage( int ch, const ImageData* img );
 	bool HasProgram() const { return !passes.empty(); }
 
 private:
@@ -92,6 +108,9 @@ private:
 	Buffer buffers[ 4 ];
 	GLuint audioTex = 0, keyboardTex = 0, black2D = 0, blackCube = 0, black3D = 0;
 	GLuint vertexShader = 0;
+	GLuint chImageTex[ 4 ] = {};
+	int chImageW[ 4 ] = {}, chImageH[ 4 ] = {};
+	GLuint linearSampler = 0, mipSampler = 0;
 	ffglex::FFGLScreenQuad quad;
 	std::vector< float > audioRows;
 };

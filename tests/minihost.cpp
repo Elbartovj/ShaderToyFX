@@ -113,9 +113,9 @@ int main( int argc, char** argv )
 	for( int i = 0; i < 200; ++i )// attend le chargement asynchrone
 	{
 		frame( 1 );
-		if( DisplayName( inst, 18 ) != "Param 1" ) break;
+		if( DisplayName( inst, 18 ).find( "(" ) != std::string::npos ) break;
 	}
-	printf( "param 11 display name = '%s'\n", DisplayName( inst, 18 ).c_str() );
+	printf( "param 11 display name = '%s'\n", DisplayName( inst, 26 ).c_str() );
 	printf( "param 0 (Shader) = '%s'\n", (const char*)Call( 9, U( 0 ), inst ).PointerValue );
 	SetF( inst, 16, 0.5f );// amount = 1.0 (plage 0..2)
 	SetF( inst, 6, 0.25f );// Speed 1x
@@ -137,17 +137,30 @@ int main( int argc, char** argv )
 	printf( "auto mask inversé : alpha = %d (attendu 255)\n", px[ 3 ] );
 
 	printf( "sliders :" );
-	for( int i = 18; i < 28; ++i )
+	for( int i = 26; i < 36; ++i )
 		printf( " [%s=%s]", DisplayName( inst, i ).c_str(), (const char*)Call( 7, U( i ), inst ).PointerValue );
 	printf( "\n" );
 	SetF( inst, 13, 0.0f );// mask off
 	frame( 2 );
 	pixel( 5, 5, px );
 	printf( "rouge avant = %d\n", px[ 0 ] );
-	SetF( inst, 20, 0.0f );// 3e slider (TINT.r pour params.glsl) à 0
+	SetF( inst, 28, 0.0f );// 3e slider (TINT.r pour params.glsl) à 0
 	frame( 2 );
 	pixel( 5, 5, px );
 	printf( "rouge après TINT.r=0 : %d\n", px[ 0 ] );
+
+	// Inputs : iChannel0 -> entrée Resolume puis image
+	printf( "param 18 = '%s'\n", DisplayName( inst, 18 ).c_str() );
+	SetF( inst, 18, 1.0f );
+	frame( 3 );
+	pixel( 5, 5, px );
+	printf( "iChannel0=entrée : %d %d %d\n", px[ 0 ], px[ 1 ], px[ 2 ] );
+	SetF( inst, 18, 2.0f );
+	SetT( inst, 19, "checker.png" );
+	for( int i = 0; i < 20; ++i ) frame( 1 );
+	pixel( 5, 5, px );
+	printf( "iChannel0=image : %d %d %d\n", px[ 0 ], px[ 1 ], px[ 2 ] );
+	printf( "param 19 = '%s' -> '%s'\n", DisplayName( inst, 19 ).c_str(), (const char*)Call( 9, U( 19 ), inst ).PointerValue );
 
 	// Random From = dossier Techno (index 4 : Bibliothèque, Ambient, Local, Shadertoy, Techno)
 	SetF( inst, 3, 4.0f );

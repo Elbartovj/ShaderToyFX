@@ -425,6 +425,20 @@ static std::shared_ptr< ImageData > DecodeVolume( const std::vector< uint8_t >& 
 	return img;
 }
 
+std::shared_ptr< ImageData > LoadImageFile( const std::string& path, bool vflip, std::string& err )
+{
+	std::vector< uint8_t > bytes;
+	if( !ReadFileBytes( path, bytes ) || bytes.empty() )
+	{
+		err = "Impossible de lire l'image " + path;
+		return nullptr;
+	}
+	auto img = DecodeImage( bytes, vflip );
+	if( !img )
+		err = "Format d'image non reconnu : " + path;
+	return img;
+}
+
 void ResolveMedia( ShaderDoc& doc, bool allowDownload )
 {
 	std::map< std::string, std::shared_ptr< const ImageData > > cache;

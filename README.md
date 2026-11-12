@@ -47,6 +47,7 @@ Sans clé, le bouton **Rechercher** ouvre la recherche dans ton navigateur, et *
 | Controls | Shader Alpha | Désactivé par défaut : alpha = 1 comme sur Shadertoy. Activé : l'alpha du shader est conservé. |
 | Audio | Audio Gain, Audio FFT | La FFT de Resolume est convertie en texture audio Shadertoy (512×2). |
 | Auto Mask | **Auto Mask**, Mask Source, Mask Threshold, Mask Softness, Mask Invert | Rend transparentes les zones sombres de la sortie pour superposer le shader aux couches du dessous. *Source* : Luminance, Max RGB (garde les couleurs saturées) ou Shader Alpha × Luma. *Threshold* fixe le niveau de coupure, *Softness* adoucit le bord, *Invert* masque les zones claires à la place. |
+| Inputs | **iChannel0 à 3** (+ *Image*) | Choisit ce qui entre dans chaque iChannel : *Shader (défaut)*, *Entrée Resolume* (le clip/la couche sous l'effet), *Image (fichier)* (un sélecteur d'image apparaît), *Audio FFT* ou *Noir*. Seuls les canaux utilisés par le shader sont affichés, avec leur contenu d'origine, par ex. « iChannel0 (texture) ». Les buffers (feedback) ne sont jamais remplacés. |
 | Shader Params | jusqu'à 24 sliders | Créés automatiquement à partir du shader : `uniform`, `#define` numériques et constantes globales (voir ci-dessous). Renommés au chargement, masqués s'ils ne servent pas. |
 
 ## Le panneau Shader Library

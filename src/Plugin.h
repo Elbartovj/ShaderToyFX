@@ -4,6 +4,8 @@
 #include <chrono>
 #include <string>
 #include <vector>
+#include <memory>
+#include <mutex>
 #include "Renderer.h"
 #include "Instance.h"
 
@@ -27,6 +29,8 @@ enum ParamIndex : unsigned int
 	PT_MASK_THRESHOLD,
 	PT_MASK_SOFTNESS,
 	PT_MASK_INVERT,
+	PT_CH_FIRST,// pour chaque iChannel : source (option) puis image (fichier)
+	PT_CH_LAST = PT_CH_FIRST + 7,
 	PT_USER0,
 	PT_COUNT = PT_USER0 + stfx::kMaxUserParams
 };
@@ -51,6 +55,10 @@ private:
 	void ApplyPending();
 	void ApplyUserParams( const std::vector< stfx::UserParam >& params, bool resetValues, bool keepHostValues );
 	void ResetClock();
+	void UpdateChannelParams( bool raiseEvents );
+	void RequestChannelImage( int ch, const std::string& path );
+	static unsigned int ChSrc( int ch ) { return PT_CH_FIRST + ch * 2; }
+	static unsigned int ChImg( int ch ) { return PT_CH_FIRST + ch * 2 + 1; }
 	void RefreshRandomSources( bool force, bool raiseEvents );
 	std::string RandomSource() const;
 
@@ -59,6 +67,18 @@ private:
 	bool glReady = false;
 
 	std::string shaderPath;
+	// images choisies pour iChannel0..3 (décodées sur un thread, envoyées au GPU dans ProcessOpenGL)
+	struct ImageSlots
+	{
+		std::mutex m;
+		std::shared_ptr< stfx::ImageData > pending[ 4 ];
+		bool hasPending[ 4 ] = {};
+		uint64_t gen[ 4 ]   = {};
+		std::string error;
+	};
+	std::shared_ptr< ImageSlots > imageSlots = std::make_shared< ImageSlots >();
+	std::string chImagePath[ 4 ];
+	bool chUsed[ 4 ] = { true, true, true, true };
 	std::vector< std::string > randomSources;// "" = bibliothèque, kRandomOnline, dossiers
 	std::string randomFolder;                 // source choisie (persistée)
 	std::chrono::steady_clock::time_point lastFolderScan;

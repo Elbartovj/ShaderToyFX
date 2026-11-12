@@ -2,6 +2,7 @@
 #include "Panel.h"
 #include "Util.h"
 #include "ShadertoyApi.h"
+#include <thread>
 #include <ffgl/FFGLLog.h>
 #include <ctime>
 #include <cstring>
@@ -81,6 +82,22 @@ ShaderToyFX::ShaderToyFX()
 	for( unsigned int i = PT_MASK_ON; i <= PT_MASK_INVERT; ++i )
 		SetParamGroup( i, "Auto Mask" );
 
+	// Inputs : remplacer la texture de chaque iChannel par l'entrée Resolume ou une image au choix
+	for( int ch = 0; ch < 4; ++ch )
+	{
+		std::string n = "iChannel" + std::to_string( ch );
+		SetOptionParamInfo( ChSrc( ch ), n.c_str(), CH_MODE_COUNT, 0.0f );
+		SetParamElementInfo( ChSrc( ch ), CH_SHADER, "Shader (défaut)", (float)CH_SHADER );
+		SetParamElementInfo( ChSrc( ch ), CH_INPUT, "Entrée Resolume", (float)CH_INPUT );
+		SetParamElementInfo( ChSrc( ch ), CH_IMAGE, "Image (fichier)", (float)CH_IMAGE );
+		SetParamElementInfo( ChSrc( ch ), CH_AUDIO, "Audio FFT", (float)CH_AUDIO );
+		SetParamElementInfo( ChSrc( ch ), CH_BLACK, "Noir", (float)CH_BLACK );
+		SetFileParamInfo( ChImg( ch ), ( n + " Image" ).c_str(), { "png", "jpg", "jpeg", "bmp", "tga", "gif", "hdr", "psd" }, "" );
+		SetParamGroup( ChSrc( ch ), "Inputs" );
+		SetParamGroup( ChImg( ch ), "Inputs" );
+		SetParamVisibility( ChImg( ch ), false, false );
+	}
+
 	for( unsigned int i = 0; i < (unsigned)kMaxUserParams; ++i )
 	{
 		unsigned int idx = PT_USER0 + i;
@@ -101,6 +118,80 @@ ShaderToyFX::ShaderToyFX()
 
 	shared = std::make_shared< InstanceShared >();
 	RefreshRandomSources( true, false );
+}
+
+void ShaderToyFX::RequestChannelImage( int ch, const std::string& path )
+{
+	uint64_t gen;
+	{
+		std::lock_guard< std::mutex > lock( imageSlots->m );
+		gen = ++imageSlots->gen[ ch ];
+		if( path.empty() )
+		{
+			imageSlots->pending[ ch ].reset();
+			imageSlots->hasPending[ ch ] = true;
+			return;
+		}
+	}
+	PinModuleForThreads();
+	std::weak_ptr< ImageSlots > weak = imageSlots;
+	std::thread( [ weak, ch, gen, path ]() {
+		std::string err;
+		auto img = LoadImageFile( path, true, err );
+		auto sp  = weak.lock();
+		if( !sp )
+			return;
+		std::lock_guard< std::mutex > lock( sp->m );
+		if( gen != sp->gen[ ch ] )
+			return;
+		sp->pending[ ch ]    = img;
+		sp->hasPending[ ch ] = true;
+		if( !img )
+			sp->error = "iChannel" + std::to_string( ch ) + " : " + err;
+	} ).detach();
+}
+
+// Affiche les réglages iChannel utilisés par le shader, avec ce qu'ils contiennent à l'origine
+void ShaderToyFX::UpdateChannelParams( bool raiseEvents )
+{
+	std::shared_ptr< const ShaderDoc > doc;
+	{
+		std::lock_guard< std::mutex > lock( shared->m );
+		doc = shared->current;
+	}
+	for( int ch = 0; ch < 4; ++ch )
+	{
+		std::string tag = "iChannel" + std::to_string( ch );
+		bool used       = false;
+		std::string what;
+		if( doc )
+		{
+			for( auto& p : doc->passes )
+			{
+				if( p.code.find( tag ) == std::string::npos && doc->common.find( tag ) == std::string::npos )
+					continue;
+				used = true;
+				if( !what.empty() && !p.isImage )
+					continue;
+				switch( p.ch[ ch ].kind )
+				{
+				case ChannelKind::Texture: what = "texture"; break;
+				case ChannelKind::Input: what = "entrée"; break;
+				case ChannelKind::Audio: what = "audio"; break;
+				case ChannelKind::Buffer: what = std::string( "buffer " ) + (char)( 'A' + std::max( 0, p.ch[ ch ].buffer ) ); break;
+				case ChannelKind::Cubemap: what = "cubemap"; break;
+				case ChannelKind::Volume: what = "volume"; break;
+				case ChannelKind::Keyboard: what = "clavier"; break;
+				default: what = "vide"; break;
+				}
+			}
+		}
+		chUsed[ ch ] = used;
+		SetParamVisibility( ChSrc( ch ), used, raiseEvents );
+		SetParamVisibility( ChImg( ch ), used && values[ ChSrc( ch ) ] == (float)CH_IMAGE, raiseEvents );
+		if( used )
+			SetParamDisplayName( ChSrc( ch ), tag + " (" + what + ")", raiseEvents );
+	}
 }
 
 std::string ShaderToyFX::RandomSource() const
@@ -269,23 +360,27 @@ void ShaderToyFX::ApplyPending()
 			ResetClock();
 	}
 
-	std::lock_guard< std::mutex > lock( shared->m );
-	shared->busy = false;
+	{
+		std::lock_guard< std::mutex > lock( shared->m );
+		shared->busy = false;
+		if( ok )
+		{
+			shared->current = std::shared_ptr< const ShaderDoc >( doc.release() );
+			shared->docVersion++;
+			shared->lastBuildOk = true;
+			shared->status      = "OK : " + shared->current->title;
+			shared->log         = warnings;
+		}
+		else
+		{
+			shared->lastBuildOk = false;
+			shared->status      = "Erreur de compilation : " + doc->title;
+			shared->log         = log + ( warnings.empty() ? "" : "\n" + warnings );
+			FFGLLog::LogToHost( ( "ShaderToyFX: " + shared->status + "\n" + log ).c_str() );
+		}
+	}
 	if( ok )
-	{
-		shared->current = std::shared_ptr< const ShaderDoc >( doc.release() );
-		shared->docVersion++;
-		shared->lastBuildOk = true;
-		shared->status      = "OK : " + shared->current->title;
-		shared->log         = warnings;
-	}
-	else
-	{
-		shared->lastBuildOk = false;
-		shared->status      = "Erreur de compilation : " + doc->title;
-		shared->log         = log + ( warnings.empty() ? "" : "\n" + warnings );
-		FFGLLog::LogToHost( ( "ShaderToyFX: " + shared->status + "\n" + log ).c_str() );
-	}
+		UpdateChannelParams( true );
 }
 
 FFResult ShaderToyFX::ProcessOpenGL( ProcessOpenGLStruct* pGL )
@@ -330,6 +425,24 @@ FFResult ShaderToyFX::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	in.frame     = frame;
 	in.sampleRate = sampleRate > 0 ? (float)sampleRate : 44100.0f;
 	in.shaderAlpha = values[ PT_SHADER_ALPHA ] > 0.5f;
+	{
+		std::lock_guard< std::mutex > lock( imageSlots->m );
+		for( int ch = 0; ch < 4; ++ch )
+			if( imageSlots->hasPending[ ch ] )
+			{
+				renderer.SetChannelImage( ch, imageSlots->pending[ ch ].get() );
+				imageSlots->pending[ ch ].reset();
+				imageSlots->hasPending[ ch ] = false;
+			}
+		if( !imageSlots->error.empty() )
+		{
+			std::lock_guard< std::mutex > l2( shared->m );
+			shared->log += "- " + imageSlots->error + "\n";
+			imageSlots->error.clear();
+		}
+	}
+	for( int ch = 0; ch < 4; ++ch )
+		in.chMode[ ch ] = (int)values[ ChSrc( ch ) ];
 	if( values[ PT_MASK_ON ] > 0.5f )
 	{
 		in.maskMode      = 1 + (int)std::lround( std::clamp( values[ PT_MASK_SOURCE ], 0.0f, 2.0f ) );
@@ -394,6 +507,16 @@ FFResult ShaderToyFX::SetFloatParameter( unsigned int index, float value )
 {
 	if( index >= PT_COUNT || index == PT_SHADER || index == PT_FFT || index == PT_RANDOM_FOLDER )
 		return index == PT_FFT ? FF_SUCCESS : FF_FAIL;
+	if( index >= PT_CH_FIRST && index <= PT_CH_LAST )
+	{
+		if( ( index - PT_CH_FIRST ) % 2 == 1 )
+			return FF_FAIL;// paramètre fichier
+		int ch          = ( index - PT_CH_FIRST ) / 2;
+		values[ index ] = std::clamp( std::round( value ), 0.0f, (float)( CH_MODE_COUNT - 1 ) );
+		// le sélecteur d'image n'apparaît qu'en mode « Image »
+		SetParamVisibility( ChImg( ch ), chUsed[ ch ] && values[ index ] == (float)CH_IMAGE, glReady );
+		return FF_SUCCESS;
+	}
 	if( index == PT_RANDOM_FROM )
 	{
 		values[ index ] = value;
@@ -436,6 +559,17 @@ float ShaderToyFX::GetFloatParameter( unsigned int index )
 
 FFResult ShaderToyFX::SetTextParameter( unsigned int index, const char* value )
 {
+	if( index >= PT_CH_FIRST && index <= PT_CH_LAST && ( index - PT_CH_FIRST ) % 2 == 1 )
+	{
+		int ch = ( index - PT_CH_FIRST ) / 2;
+		std::string path = value ? value : "";
+		if( path != chImagePath[ ch ] )
+		{
+			chImagePath[ ch ] = path;
+			RequestChannelImage( ch, path );
+		}
+		return FF_SUCCESS;
+	}
 	if( index == PT_RANDOM_FOLDER )
 	{
 		randomFolder = value ? value : "";
@@ -463,6 +597,8 @@ FFResult ShaderToyFX::SetTextParameter( unsigned int index, const char* value )
 
 char* ShaderToyFX::GetTextParameter( unsigned int index )
 {
+	if( index >= PT_CH_FIRST && index <= PT_CH_LAST && ( index - PT_CH_FIRST ) % 2 == 1 )
+		return const_cast< char* >( chImagePath[ ( index - PT_CH_FIRST ) / 2 ].c_str() );
 	if( index == PT_RANDOM_FOLDER )
 		return const_cast< char* >( randomFolder.c_str() );
 	if( index != PT_SHADER )
