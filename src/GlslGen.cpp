@@ -25,6 +25,21 @@ static const char* SamplerType( ChannelKind k )
 	}
 }
 
+// texture(iChannelN, …) -> stfx_texN(iChannelN, …) pour les canaux 2D
+static std::string RewriteChannelReads( const std::string& code, const PassDesc& pass )
+{
+	std::string out = code;
+	for( int i = 0; i < 4; ++i )
+	{
+		if( pass.ch[ i ].kind == ChannelKind::Cubemap || pass.ch[ i ].kind == ChannelKind::Volume )
+			continue;
+		std::string n = std::to_string( i );
+		out = std::regex_replace( out, std::regex( "\\b(texture|texture2D)\\s*\\(\\s*iChannel" + n + "\\s*," ), "stfx_tex" + n + "( iChannel" + n + "," );
+		out = std::regex_replace( out, std::regex( "\\b(textureLod|texture2DLod|texture2DLodEXT)\\s*\\(\\s*iChannel" + n + "\\s*," ), "stfx_texLod" + n + "( iChannel" + n + "," );
+	}
+	return out;
+}
+
 std::string BuildFragmentSource( const ShaderDoc& doc, const PassDesc& pass, int glslVersion )
 {
 	std::ostringstream s;
@@ -46,6 +61,13 @@ std::string BuildFragmentSource( const ShaderDoc& doc, const PassDesc& pass, int
 		 "uniform float iSampleRate;\n";
 	for( int i = 0; i < 4; ++i )
 		s << "uniform " << SamplerType( pass.ch[ i ].kind ) << " iChannel" << i << ";\n";
+	// lecture des iChannel 2D via une fonction : permet de recaler l'entrée (Aspect Fix) sans toucher au code
+	s << "uniform vec2 stfx_ChScale[4];\n";
+	for( int i = 0; i < 4; ++i )
+		if( pass.ch[ i ].kind != ChannelKind::Cubemap && pass.ch[ i ].kind != ChannelKind::Volume )
+			s << "vec4 stfx_tex" << i << "( sampler2D s, vec2 uv ) { return texture( s, uv * stfx_ChScale[" << i << "] ); }\n"
+			  << "vec4 stfx_tex" << i << "( sampler2D s, vec2 uv, float b ) { return texture( s, uv * stfx_ChScale[" << i << "], b ); }\n"
+			  << "vec4 stfx_texLod" << i << "( sampler2D s, vec2 uv, float l ) { return textureLod( s, uv * stfx_ChScale[" << i << "], l ); }\n";
 	s << "uniform vec2 stfx_Offset;\n"
 		 "uniform int  stfx_ForceAlpha;\n"
 		 "uniform vec4 stfx_Mask; // mode, seuil, douceur, inversion\n"
@@ -59,9 +81,9 @@ std::string BuildFragmentSource( const ShaderDoc& doc, const PassDesc& pass, int
 		 "#define textureCubeLodEXT textureLod\n"
 		 "#define texture2DGradEXT textureGrad\n"
 		 "#line 1 1\n"
-	  << ApplyParamRewrites( doc.common, doc.params ) << "\n"
+	  << RewriteChannelReads( ApplyParamRewrites( doc.common, doc.params ), pass ) << "\n"
 	  << "#line 1 2\n"
-	  << ApplyParamRewrites( pass.code, doc.params ) << "\n"
+	  << RewriteChannelReads( ApplyParamRewrites( pass.code, doc.params ), pass ) << "\n"
 	  << "#line 1 3\n"
 		 "void main()\n"
 		 "{\n"

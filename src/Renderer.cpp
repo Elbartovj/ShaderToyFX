@@ -439,6 +439,7 @@ bool Renderer::BuildOnce( const ShaderDoc& doc, std::string& log )
 		p.uOffset     = glGetUniformLocation( prog, "stfx_Offset" );
 		p.uForceAlpha = glGetUniformLocation( prog, "stfx_ForceAlpha" );
 		p.uMask       = glGetUniformLocation( prog, "stfx_Mask" );
+		p.uChScale    = glGetUniformLocation( prog, "stfx_ChScale" );
 		for( int i = 0; i < 4; ++i )
 			p.uChannel[ i ] = glGetUniformLocation( prog, ( "iChannel" + std::to_string( i ) ).c_str() );
 		p.uUser.clear();
@@ -738,6 +739,19 @@ void Renderer::Render( const FrameInputs& in )
 			glUniform2f( p.uOffset, p.isImage ? (float)in.vpX : 0.0f, p.isImage ? (float)in.vpY : 0.0f );
 		if( p.uForceAlpha >= 0 )
 			glUniform1i( p.uForceAlpha, ( p.isImage && !in.shaderAlpha ) ? 1 : 0 );
+		if( p.uChScale >= 0 )
+		{
+			float sc[ 8 ];
+			for( int i = 0; i < 4; ++i )
+			{
+				// Aspect Fix : seulement pour les canaux qui reçoivent l'entrée Resolume ou une image choisie
+				bool isInput = ( in.chMode[ i ] == CH_INPUT || in.chMode[ i ] == CH_IMAGE ) ||
+							   ( in.chMode[ i ] == CH_SHADER && p.ch[ i ].kind == ChannelKind::Input );
+				sc[ i * 2 + 0 ] = ( in.aspectFix && isInput && p.ch[ i ].kind != ChannelKind::Buffer ) ? (float)h / (float)w : 1.0f;
+				sc[ i * 2 + 1 ] = 1.0f;
+			}
+			glUniform2fv( p.uChScale, 4, sc );
+		}
 		if( p.uMask >= 0 )
 			glUniform4f( p.uMask, p.isImage ? (float)in.maskMode : 0.0f, in.maskThreshold, in.maskSoftness, in.maskInvert ? 1.0f : 0.0f );
 		for( size_t u = 0; u < userUniforms.size() && u < p.uUser.size(); ++u )

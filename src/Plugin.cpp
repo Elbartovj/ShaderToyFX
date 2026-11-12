@@ -103,6 +103,8 @@ ShaderToyFX::ShaderToyFX()
 	SetParamElementInfo( PT_INPUT_FIT, 2, "Remplir (rogner)", 2.0f );
 	SetParamElementInfo( PT_INPUT_FIT, 3, "Pixel 1:1", 3.0f );
 	SetParamGroup( PT_INPUT_FIT, "Inputs" );
+	SetParamInfo( PT_ASPECT_FIX, "Aspect Fix", FF_TYPE_BOOLEAN, false );
+	SetParamGroup( PT_ASPECT_FIX, "Inputs" );
 	if( kIsSource )
 		SetParamVisibility( PT_INPUT_FIT, false, false );
 
@@ -451,6 +453,7 @@ FFResult ShaderToyFX::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	}
 	for( int ch = 0; ch < 4; ++ch )
 		in.chMode[ ch ] = (int)values[ ChSrc( ch ) ];
+	in.aspectFix = values[ PT_ASPECT_FIX ] > 0.5f;
 	if( values[ PT_MASK_ON ] > 0.5f )
 	{
 		in.maskMode      = 1 + (int)std::lround( std::clamp( values[ PT_MASK_SOURCE ], 0.0f, 2.0f ) );

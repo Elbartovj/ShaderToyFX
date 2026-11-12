@@ -31,6 +31,7 @@ struct FrameInputs
 	// Remplacement des iChannel depuis les paramètres de l'effet
 	// 0 = celui du shader, 1 = entrée Resolume, 2 = image choisie, 3 = audio, 4 = noir
 	int chMode[ 4 ] = {};
+	bool aspectFix = false;// recale l'entrée pour les shaders qui font uv.x *= iResolution.x / iResolution.y
 };
 
 enum ChannelOverride
@@ -77,7 +78,7 @@ private:
 		Channel ch[ 4 ];
 		GLuint samplers[ 4 ] = {};
 		GLint uRes = -1, uTime = -1, uTimeDelta = -1, uFrameRate = -1, uFrame = -1, uChannelTime = -1, uChannelRes = -1,
-			  uMouse = -1, uDate = -1, uSampleRate = -1, uOffset = -1, uForceAlpha = -1, uMask = -1;
+			  uMouse = -1, uDate = -1, uSampleRate = -1, uOffset = -1, uForceAlpha = -1, uMask = -1, uChScale = -1;
 		GLint uChannel[ 4 ] = { -1, -1, -1, -1 };
 		std::vector< GLint > uUser;// une location par groupe d'uniforms (userUniforms)
 	};
