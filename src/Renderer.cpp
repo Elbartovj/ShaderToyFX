@@ -98,6 +98,44 @@ bool Renderer::InitGL()
 	glSamplerParameteri( linearSampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 	glSamplerParameteri( linearSampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
 	glSamplerParameteri( linearSampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	// programme de copie de l'entrée
+	{
+		static const char* fsCopy = R"(#version 410 core
+uniform sampler2D uTex;
+uniform vec2 uMaxUV;  // Width/HardwareWidth, Height/HardwareHeight
+uniform vec4 uFit;    // échelle xy (autour du centre)
+uniform vec2 uSize;   // taille de sortie
+uniform vec2 uHalf;   // demi-texel : évite de filtrer la marge matérielle au bord
+out vec4 o;
+void main()
+{
+	vec2 uv = gl_FragCoord.xy / uSize;
+	vec2 s  = ( uv - 0.5 ) * uFit.xy + 0.5;
+	if( any( lessThan( s, vec2( 0.0 ) ) ) || any( greaterThan( s, vec2( 1.0 ) ) ) )
+		o = vec4( 0.0 );
+	else
+		o = texture( uTex, clamp( s * uMaxUV, uHalf, uMaxUV - uHalf ) );
+}
+)";
+		std::string clog;
+		GLuint fs = Compile( GL_FRAGMENT_SHADER, fsCopy, clog );
+		if( fs )
+		{
+			copyProgram = glCreateProgram();
+			glAttachShader( copyProgram, vertexShader );
+			glAttachShader( copyProgram, fs );
+			glLinkProgram( copyProgram );
+			glDetachShader( copyProgram, vertexShader );
+			glDetachShader( copyProgram, fs );
+			glDeleteShader( fs );
+			uCopyTex   = glGetUniformLocation( copyProgram, "uTex" );
+			uCopyMaxUV = glGetUniformLocation( copyProgram, "uMaxUV" );
+			uCopyFit   = glGetUniformLocation( copyProgram, "uFit" );
+			uCopySize  = glGetUniformLocation( copyProgram, "uSize" );
+			uCopyHalf  = glGetUniformLocation( copyProgram, "uHalf" );
+		}
+	}
+
 	glGenSamplers( 1, &mipSampler );
 	glSamplerParameteri( mipSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
 	glSamplerParameteri( mipSampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
@@ -130,6 +168,14 @@ void Renderer::DeInitGL()
 	glDeleteTextures( 5, t );
 	for( int i = 0; i < 4; ++i )
 		SetChannelImage( i, nullptr );
+	if( copyProgram )
+		glDeleteProgram( copyProgram );
+	if( copyFbo )
+		glDeleteFramebuffers( 1, &copyFbo );
+	if( copyTex )
+		glDeleteTextures( 1, &copyTex );
+	copyProgram = copyFbo = copyTex = 0;
+	copyW = copyH = 0;
 	if( linearSampler )
 		glDeleteSamplers( 1, &linearSampler );
 	if( mipSampler )
@@ -468,10 +514,78 @@ void Renderer::UpdateAudio( const float* fft, int count, float gain )
 	glBindTexture( GL_TEXTURE_2D, 0 );
 }
 
+void Renderer::PrepareInput( const FrameInputs& in )
+{
+	if( !in.inputTex || !copyProgram || in.inputW <= 0 || in.inputH <= 0 )
+		return;
+	int w = in.width, h = in.height;
+	if( !copyFbo || copyW != w || copyH != h )
+	{
+		if( !copyFbo )
+			glGenFramebuffers( 1, &copyFbo );
+		if( copyTex )
+			glDeleteTextures( 1, &copyTex );
+		copyTex = MakeTex( GL_TEXTURE_2D );
+		glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_FLOAT, nullptr );
+		glBindTexture( GL_TEXTURE_2D, 0 );
+		glBindFramebuffer( GL_FRAMEBUFFER, copyFbo );
+		glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, copyTex, 0 );
+		copyW = w;
+		copyH = h;
+	}
+	float ao = (float)w / (float)h, ai = (float)in.inputW / (float)in.inputH;
+	float sx = 1.0f, sy = 1.0f;
+	switch( in.inputFit )
+	{
+	case 1:// contenir : image entière, bandes noires
+		if( ai > ao )
+			sy = ai / ao;
+		else
+			sx = ao / ai;
+		break;
+	case 2:// remplir : couvre tout, rogne
+		if( ai > ao )
+			sx = ao / ai;
+		else
+			sy = ai / ao;
+		break;
+	case 3:// pixel pour pixel, centré
+		sx = (float)w / (float)in.inputW;
+		sy = (float)h / (float)in.inputH;
+		break;
+	default:// étirer
+		break;
+	}
+	float mu = in.inputHwW > 0 ? (float)in.inputW / (float)in.inputHwW : 1.0f;
+	float mv = in.inputHwH > 0 ? (float)in.inputH / (float)in.inputHwH : 1.0f;
+
+	glBindFramebuffer( GL_FRAMEBUFFER, copyFbo );
+	glViewport( 0, 0, w, h );
+	glUseProgram( copyProgram );
+	glActiveTexture( GL_TEXTURE0 );
+	glBindTexture( GL_TEXTURE_2D, in.inputTex );
+	glBindSampler( 0, linearSampler );
+	glUniform1i( uCopyTex, 0 );
+	glUniform2f( uCopyMaxUV, mu, mv );
+	glUniform4f( uCopyFit, sx, sy, 0.0f, 0.0f );
+	glUniform2f( uCopySize, (float)w, (float)h );
+	float hw = (float)( in.inputHwW > 0 ? in.inputHwW : in.inputW ), hh = (float)( in.inputHwH > 0 ? in.inputHwH : in.inputH );
+	glUniform2f( uCopyHalf, 0.5f / hw, 0.5f / hh );
+	quad.Draw();
+	glBindSampler( 0, 0 );
+	glBindTexture( GL_TEXTURE_2D, 0 );
+}
+
 void Renderer::Render( const FrameInputs& in )
 {
 	if( passes.empty() )
 		return;
+
+	// entrée Resolume recadrée : même taille que la sortie, marge matérielle retirée
+	PrepareInput( in );
+	GLuint inputTex = ( in.inputTex && copyTex ) ? copyTex : in.inputTex;
+	float inputW    = ( in.inputTex && copyTex ) ? (float)copyW : (float)in.inputW;
+	float inputH    = ( in.inputTex && copyTex ) ? (float)copyH : (float)in.inputH;
 
 	bool mipsDone[ 4 ] = {};
 	float chRes[ 12 ];
@@ -520,9 +634,9 @@ void Renderer::Render( const FrameInputs& in )
 				switch( mode )
 				{
 				case CH_INPUT:
-					tex     = in.inputTex;
-					rw      = (float)in.inputW;
-					rh      = (float)in.inputH;
+					tex     = inputTex;
+					rw      = inputW;
+					rh      = inputH;
 					sampler = linearSampler;
 					break;
 				case CH_IMAGE:
@@ -547,9 +661,9 @@ void Renderer::Render( const FrameInputs& in )
 			switch( c.kind )
 			{
 			case ChannelKind::Input:
-				tex = in.inputTex;
-				rw  = (float)in.inputW;
-				rh  = (float)in.inputH;
+				tex = inputTex;
+				rw  = inputW;
+				rh  = inputH;
 				break;
 			case ChannelKind::Audio:
 				tex = audioTex;

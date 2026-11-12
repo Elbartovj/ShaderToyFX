@@ -13,7 +13,9 @@ struct FrameInputs
 	GLuint hostFbo = 0;
 	int vpX = 0, vpY = 0, width = 1, height = 1;
 	GLuint inputTex = 0;
-	int inputW = 0, inputH = 0;
+	int inputW = 0, inputH = 0;    // taille utile de l'image
+	int inputHwW = 0, inputHwH = 0;// taille réelle de la texture (peut être plus grande : marge)
+	int inputFit = 0;              // 0 étirer, 1 contenir (bandes), 2 remplir (rogner), 3 pixel 1:1
 	float time = 0, timeDelta = 0, frameRate = 60;
 	int frame = 0;
 	float mouse[ 4 ] = {};
@@ -111,6 +113,11 @@ private:
 	GLuint chImageTex[ 4 ] = {};
 	int chImageW[ 4 ] = {}, chImageH[ 4 ] = {};
 	GLuint linearSampler = 0, mipSampler = 0;
+	// copie de l'entrée Resolume, recadrée à la taille de sortie : toujours alignée sur fragCoord
+	void PrepareInput( const FrameInputs& in );
+	GLuint copyProgram = 0, copyFbo = 0, copyTex = 0;
+	int copyW = 0, copyH = 0;
+	GLint uCopyTex = -1, uCopyMaxUV = -1, uCopyFit = -1, uCopySize = -1, uCopyHalf = -1;
 	ffglex::FFGLScreenQuad quad;
 	std::vector< float > audioRows;
 };

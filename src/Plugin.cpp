@@ -97,6 +97,14 @@ ShaderToyFX::ShaderToyFX()
 		SetParamGroup( ChImg( ch ), "Inputs" );
 		SetParamVisibility( ChImg( ch ), false, false );
 	}
+	SetOptionParamInfo( PT_INPUT_FIT, "Input Fit", 4, 0.0f );
+	SetParamElementInfo( PT_INPUT_FIT, 0, "Étirer", 0.0f );
+	SetParamElementInfo( PT_INPUT_FIT, 1, "Contenir (bandes)", 1.0f );
+	SetParamElementInfo( PT_INPUT_FIT, 2, "Remplir (rogner)", 2.0f );
+	SetParamElementInfo( PT_INPUT_FIT, 3, "Pixel 1:1", 3.0f );
+	SetParamGroup( PT_INPUT_FIT, "Inputs" );
+	if( kIsSource )
+		SetParamVisibility( PT_INPUT_FIT, false, false );
 
 	for( unsigned int i = 0; i < (unsigned)kMaxUserParams; ++i )
 	{
@@ -455,6 +463,9 @@ FFResult ShaderToyFX::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 		in.inputTex = pGL->inputTextures[ 0 ]->Handle;
 		in.inputW   = (int)pGL->inputTextures[ 0 ]->Width;
 		in.inputH   = (int)pGL->inputTextures[ 0 ]->Height;
+		in.inputHwW = (int)pGL->inputTextures[ 0 ]->HardwareWidth;
+		in.inputHwH = (int)pGL->inputTextures[ 0 ]->HardwareHeight;
+		in.inputFit = (int)std::lround( values[ PT_INPUT_FIT ] );
 	}
 
 	// souris façon Shadertoy : xy = position, zw = position du clic (signe = état)

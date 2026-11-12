@@ -137,14 +137,14 @@ int main( int argc, char** argv )
 	printf( "auto mask inversé : alpha = %d (attendu 255)\n", px[ 3 ] );
 
 	printf( "sliders :" );
-	for( int i = 26; i < 36; ++i )
+	for( int i = 27; i < 37; ++i )
 		printf( " [%s=%s]", DisplayName( inst, i ).c_str(), (const char*)Call( 7, U( i ), inst ).PointerValue );
 	printf( "\n" );
 	SetF( inst, 13, 0.0f );// mask off
 	frame( 2 );
 	pixel( 5, 5, px );
 	printf( "rouge avant = %d\n", px[ 0 ] );
-	SetF( inst, 28, 0.0f );// 3e slider (TINT.r pour params.glsl) à 0
+	SetF( inst, 29, 0.0f );// 3e slider (TINT.r pour params.glsl) à 0
 	frame( 2 );
 	pixel( 5, 5, px );
 	printf( "rouge après TINT.r=0 : %d\n", px[ 0 ] );

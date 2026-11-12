@@ -31,6 +31,7 @@ enum ParamIndex : unsigned int
 	PT_MASK_INVERT,
 	PT_CH_FIRST,// pour chaque iChannel : source (option) puis image (fichier)
 	PT_CH_LAST = PT_CH_FIRST + 7,
+	PT_INPUT_FIT,// cadrage de l'entrée Resolume : étirer / contenir / remplir / 1:1
 	PT_USER0,
 	PT_COUNT = PT_USER0 + stfx::kMaxUserParams
 };
