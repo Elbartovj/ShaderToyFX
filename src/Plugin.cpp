@@ -88,7 +88,7 @@ ShaderToyFX::ShaderToyFX()
 		std::string n = "iChannel" + std::to_string( ch );
 		SetOptionParamInfo( ChSrc( ch ), n.c_str(), CH_MODE_COUNT, 0.0f );
 		SetParamElementInfo( ChSrc( ch ), CH_SHADER, "Shader (défaut)", (float)CH_SHADER );
-		SetParamElementInfo( ChSrc( ch ), CH_INPUT, "Entrée Resolume", (float)CH_INPUT );
+		SetParamElementInfo( ChSrc( ch ), CH_INPUT, kIsSource ? "Entrée (effet seulement)" : "Entrée Resolume", (float)CH_INPUT );
 		SetParamElementInfo( ChSrc( ch ), CH_IMAGE, "Image (fichier)", (float)CH_IMAGE );
 		SetParamElementInfo( ChSrc( ch ), CH_AUDIO, "Audio FFT", (float)CH_AUDIO );
 		SetParamElementInfo( ChSrc( ch ), CH_BLACK, "Noir", (float)CH_BLACK );
@@ -106,7 +106,10 @@ ShaderToyFX::ShaderToyFX()
 	SetParamInfo( PT_ASPECT_FIX, "Aspect Fix", FF_TYPE_BOOLEAN, false );
 	SetParamGroup( PT_ASPECT_FIX, "Inputs" );
 	if( kIsSource )
+	{
+		// une source FFGL ne reçoit aucune image de Resolume (Aspect Fix reste utile pour les images choisies)
 		SetParamVisibility( PT_INPUT_FIT, false, false );
+	}
 
 	for( unsigned int i = 0; i < (unsigned)kMaxUserParams; ++i )
 	{

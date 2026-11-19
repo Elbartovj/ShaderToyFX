@@ -12,7 +12,7 @@ Deux DLL sont produites :
 | DLL | Type Resolume | Usage |
 |---|---|---|
 | `ShaderToyFX.dll` | **Effet** | S'applique sur un clip ou une couche. L'image du dessous arrive dans les `iChannel` libres. |
-| `ShaderToyFX_Source.dll` | **Source** | Générateur autonome. |
+| `ShaderToyFX_Source.dll` | **Source** | Générateur autonome. Une source ne reçoit **aucune image de Resolume** : pour qu'un shader utilise ta vidéo ou les couches du dessous, utilise l'**effet** (sur le clip, la couche, un groupe, ou un clip *Video Router*). |
 
 ## Installation
 
