@@ -318,8 +318,7 @@ void ShaderToyFX::ApplyUserParams( const std::vector< UserParam >& params, bool 
 			SetParamDisplayName( idx, params[ i ].name, true );
 			if( resetValues && !( keepHostValues && userTouched[ i ] ) )
 			{
-				const UserParam& p = params[ i ];
-				values[ idx ]      = std::clamp( ( p.def - p.minV ) / ( p.maxV - p.minV ), 0.0f, 1.0f );
+				values[ idx ] = kUserParamDefaultNorm;// = valeur d'origine du shader
 				RaiseParamEvent( idx, FF_EVENT_FLAG_VALUE );
 			}
 		}
@@ -507,7 +506,7 @@ FFResult ShaderToyFX::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	{
 		float n = values[ PT_USER0 + i ];
 		if( i < userParams.size() )
-			in.user[ i ] = userParams[ i ].minV + n * ( userParams[ i ].maxV - userParams[ i ].minV );
+			in.user[ i ] = UserParamValue( userParams[ i ], n );
 		else
 			in.user[ i ] = n;
 	}
@@ -628,7 +627,7 @@ char* ShaderToyFX::GetParameterDisplay( unsigned int index )
 	else if( index >= PT_USER0 && index < PT_COUNT && index - PT_USER0 < userParams.size() )
 	{
 		const UserParam& p = userParams[ index - PT_USER0 ];
-		float real         = p.minV + v * ( p.maxV - p.minV );
+		float real         = UserParamValue( p, v );
 		if( p.isInt )
 			snprintf( displayBuf, sizeof( displayBuf ), "%d", (int)std::lround( real ) );
 		else

@@ -129,11 +129,30 @@ bool IsBlacklisted( const std::string& name )
 // plage par défaut à partir de la valeur
 void GuessRange( UserParam& p, float v )
 {
+	// plage symétrique : le milieu du slider (valeur par défaut dans Resolume) = valeur du shader
 	p.def = v;
 	if( p.isInt )
 	{
-		p.minV = std::min( 0.0f, v * 2.0f );
-		p.maxV = std::max( { v * 2.0f, v + 8.0f, 1.0f } );
+		if( v >= 2.0f )
+		{
+			p.minV = 1.0f;// jamais 0 : évite les divisions par zéro / boucles vides
+			p.maxV = 2.0f * v - 1.0f;
+		}
+		else if( v == 1.0f )
+		{
+			p.minV = 0.0f;
+			p.maxV = 2.0f;
+		}
+		else if( v == 0.0f )
+		{
+			p.minV = -4.0f;
+			p.maxV = 4.0f;
+		}
+		else
+		{
+			p.minV = 2.0f * v;
+			p.maxV = 0.0f;
+		}
 		return;
 	}
 	if( v == 0.0f )
@@ -176,6 +195,209 @@ void ApplyComment( UserParam& p, const std::string& comment )
 			p.def = nums[ 2 ];
 		p.def = std::clamp( p.def, p.minV, p.maxV );
 	}
+}
+
+// Remplace par des lignes vides le code des blocs de préprocesseur inactifs
+// (#ifdef NOM non défini, #if 0, #else d'un bloc actif…). Les expressions #if inconnues sont gardées.
+std::string MaskInactive( const std::string& code, std::set< std::string >& defined )
+{
+	struct Frame
+	{
+		bool parent, active, taken, known;
+	};
+	std::vector< Frame > stack;
+	auto isActive = [ & ]() { return stack.empty() || stack.back().active; };
+	static const std::regex reDir( R"(^\s*#\s*(\w+)\s*(.*)$)" );
+	static const std::regex reDefined( R"(^(!)?\s*defined\s*\(?\s*(\w+)\s*\)?\s*$)" );
+	std::string stripped = StripComments( code );
+	auto lines           = Lines( stripped );
+	auto orig            = Lines( code );
+	std::string out;
+	for( size_t i = 0; i < lines.size(); ++i )
+	{
+		std::smatch m;
+		bool keep = isActive();
+		if( std::regex_match( lines[ i ], m, reDir ) )
+		{
+			std::string d = m[ 1 ], arg = Trim( m[ 2 ] );
+			std::string name = arg.substr( 0, arg.find_first_of( " \t(" ) );
+			auto push = [ & ]( int cond ) {// 1 vrai, 0 faux, -1 inconnu
+				bool parent = isActive();
+				Frame f;
+				f.parent = parent;
+				f.known  = cond >= 0;
+				f.active = parent && cond != 0;
+				f.taken  = cond == 1;
+				stack.push_back( f );
+			};
+			if( d == "ifdef" )
+				push( defined.count( name ) ? 1 : 0 );
+			else if( d == "ifndef" )
+				push( defined.count( name ) ? 0 : 1 );
+			else if( d == "if" )
+			{
+				std::smatch dm;
+				if( arg == "0" )
+					push( 0 );
+				else if( arg == "1" )
+					push( 1 );
+				else if( std::regex_match( arg, dm, reDefined ) )
+					push( ( defined.count( dm[ 2 ] ) > 0 ) != dm[ 1 ].matched ? 1 : 0 );
+				else
+					push( -1 );
+			}
+			else if( d == "elif" && !stack.empty() )
+			{
+				Frame& f = stack.back();
+				f.active = f.parent && !( f.known && f.taken );
+				f.known  = false;
+			}
+			else if( d == "else" && !stack.empty() )
+			{
+				Frame& f = stack.back();
+				f.active = f.parent && !( f.known && f.taken );
+				if( !f.known )
+					f.active = f.parent;// branche inconnue : on garde les deux
+			}
+			else if( d == "endif" && !stack.empty() )
+				stack.pop_back();
+			else if( d == "define" && isActive() && !name.empty() )
+				defined.insert( name );
+			else if( d == "undef" && isActive() )
+				defined.erase( name );
+			keep = true;// les directives elles-mêmes restent
+			if( d == "define" && !isActive() )
+				keep = false;
+		}
+		out += keep && i < orig.size() ? orig[ i ] : std::string();
+		if( i + 1 < lines.size() )
+			out += '\n';
+	}
+	return out;
+}
+
+// Efface (espaces) le corps des fonctions jamais appelées depuis mainImage, dans tous les sources
+void BlankUnreachableFunctions( std::vector< std::string >& stripped )
+{
+	struct Fn
+	{
+		size_t src, open, close;
+		std::string name;
+		size_t header;// début du nom de la fonction
+	};
+	std::vector< Fn > fns;
+	static const std::regex reName( R"(([A-Za-z_]\w*)\s*$)" );
+	for( size_t si = 0; si < stripped.size(); ++si )
+	{
+		const std::string& t = stripped[ si ];
+		int depth            = 0;
+		bool lineStart = true, pre = false;
+		for( size_t i = 0; i < t.size(); ++i )
+		{
+			char c = t[ i ];
+			if( c == '\n' )
+			{
+				lineStart = true;
+				pre       = false;
+				continue;
+			}
+			if( lineStart && c != ' ' && c != '\t' )
+			{
+				pre       = c == '#';
+				lineStart = false;
+			}
+			if( pre )
+				continue;
+			if( c == '{' )
+			{
+				if( depth == 0 )
+				{
+					// "nom( ... ) {" ?
+					size_t j = t.find_last_not_of( " \t\n", i == 0 ? 0 : i - 1 );
+					if( j != std::string::npos && t[ j ] == ')' )
+					{
+						int pd = 0;
+						size_t k = j;
+						for( ;; )
+						{
+							if( t[ k ] == ')' )
+								++pd;
+							else if( t[ k ] == '(' && --pd == 0 )
+								break;
+							if( k == 0 )
+								break;
+							--k;
+						}
+						std::smatch m;
+						std::string before = t.substr( 0, k );
+						if( std::regex_search( before, m, reName ) )
+						{
+							// fin du corps
+							int d    = 0;
+							size_t e = i;
+							for( ; e < t.size(); ++e )
+							{
+								if( t[ e ] == '{' )
+									++d;
+								else if( t[ e ] == '}' && --d == 0 )
+									break;
+							}
+							fns.push_back( { si, i, e, m[ 1 ], (size_t)m.position( 1 ) } );
+						}
+					}
+				}
+				++depth;
+			}
+			else if( c == '}' )
+				depth = std::max( 0, depth - 1 );
+		}
+	}
+	if( fns.empty() )
+		return;
+	std::set< std::string > names;
+	for( auto& f : fns )
+		names.insert( f.name );
+	// racines : mainImage + toute fonction citée dans une macro (#define) ou hors fonction
+	std::set< std::string > reach = { "mainImage" };
+	auto scanIds = [ & ]( const std::string& text, std::vector< std::string >& found ) {
+		static const std::regex reId( R"([A-Za-z_]\w*)" );
+		for( std::sregex_iterator it( text.begin(), text.end(), reId ), end; it != end; ++it )
+			if( names.count( it->str() ) )
+				found.push_back( it->str() );
+	};
+	for( size_t si = 0; si < stripped.size(); ++si )
+	{
+		std::string outside = stripped[ si ];
+		for( auto& f : fns )
+			if( f.src == si )
+				for( size_t k = f.header; k <= f.close && k < outside.size(); ++k )
+					if( outside[ k ] != '\n' )
+						outside[ k ] = ' ';
+		std::vector< std::string > found;
+		scanIds( outside, found );// macros + déclarations globales
+		for( auto& n : found )
+			reach.insert( n );
+	}
+	bool grew = true;
+	while( grew )
+	{
+		grew = false;
+		for( auto& f : fns )
+		{
+			if( !reach.count( f.name ) )
+				continue;
+			std::vector< std::string > found;
+			scanIds( stripped[ f.src ].substr( f.open, f.close - f.open + 1 ), found );
+			for( auto& n : found )
+				if( reach.insert( n ).second )
+					grew = true;
+		}
+	}
+	for( auto& f : fns )
+		if( !reach.count( f.name ) )
+			for( size_t k = f.open; k <= f.close && k < stripped[ f.src ].size(); ++k )
+				if( stripped[ f.src ][ k ] != '\n' )
+					stripped[ f.src ][ k ] = ' ';
 }
 
 struct Candidate
@@ -343,13 +565,15 @@ bool UsedInConstContext( const std::string& name, const std::vector< std::string
 				if( std::regex_search( line, m, reDef ) && m[ 1 ] == name )
 					continue;// sa propre définition
 				// utilisée dans une autre macro : la macro hérite des contraintes
-				++uses;
 				if( std::regex_search( line, m, reDef ) && depthGuard < 4 )
 				{
 					int sub = 0;
 					if( UsedInConstContext( m[ 1 ], strippedSources, statements, sub, depthGuard + 1 ) )
 						return true;
+					uses += sub;// la macro n'est utile que si elle est utilisée
 				}
+				else
+					++uses;
 				continue;
 			}
 			if( std::regex_search( line, inBrackets ) || std::regex_search( line, caseLabel ) )
@@ -443,7 +667,18 @@ void ExtractUserParams( ShaderDoc& doc )
 		}
 	}
 
-	// 2) #define et constantes globales
+	// 2) #define et constantes globales (hors blocs #ifdef inactifs : un réglage sans effet n'est pas exposé)
+	{
+		std::vector< std::string > masked;
+		std::set< std::string > defCommon;
+		masked.push_back( MaskInactive( sources[ 0 ], defCommon ) );
+		for( size_t k = 1; k < sources.size(); ++k )
+		{
+			std::set< std::string > defs = defCommon;
+			masked.push_back( MaskInactive( sources[ k ], defs ) );
+		}
+		sources = masked;
+	}
 	std::vector< Candidate > cands;
 	for( const std::string& src : sources )
 		FindCandidates( src, cands );
@@ -453,10 +688,10 @@ void ExtractUserParams( ShaderDoc& doc )
 	std::vector< std::string > stripped;
 	std::vector< std::vector< Statement > > statements;
 	for( const std::string& src : sources )
-	{
 		stripped.push_back( StripComments( src ) );
-		statements.push_back( SplitStatements( stripped.back() ) );
-	}
+	BlankUnreachableFunctions( stripped );// un réglage utilisé seulement par du code mort n'a aucun effet
+	for( const std::string& st : stripped )
+		statements.push_back( SplitStatements( st ) );
 
 	// noms définis plusieurs fois avec des valeurs différentes : ambigus
 	std::map< std::string, std::vector< const Candidate* > > byName;
@@ -469,6 +704,10 @@ void ExtractUserParams( ShaderDoc& doc )
 	{
 		if( done.count( c.name ) || seen.count( c.name ) || IsBlacklisted( c.name ) )
 			continue;
+		if( c.name.rfind( "KEY_", 0 ) == 0 )
+			continue;// code de touche clavier
+		if( c.vecSize > 1 && std::all_of( c.values.begin(), c.values.end(), []( float v ) { return v == 0.0f || v == 1.0f || v == -1.0f; } ) )
+			continue;// vecteur de direction / décalage de voisinage, pas un réglage
 		done.insert( c.name );
 		bool ambiguous = false;
 		for( const Candidate* o : byName[ c.name ] )
@@ -496,9 +735,9 @@ void ExtractUserParams( ShaderDoc& doc )
 			p.name    = c.vecSize > 1 ? c.name + "." + ( color ? rgba[ k ] : xyzw[ k ] ) : c.name;
 			if( color )
 			{
-				p.minV = 0;
-				p.maxV = 1;
 				p.def  = c.values[ k ];
+				p.minV = p.def - 0.5f;
+				p.maxV = p.def + 0.5f;
 			}
 			else
 				GuessRange( p, c.values[ k ] );
@@ -508,6 +747,40 @@ void ExtractUserParams( ShaderDoc& doc )
 			++used;
 		}
 	}
+}
+
+std::string ZeroInitLocals( const std::string& code )
+{
+	static const std::regex reDecl( R"(^(\s*)((?:(?:highp|mediump|lowp)\s+)?)(float|int|uint|bool|vec[234]|ivec[234]|uvec[234]|bvec[234]|mat[234])(\s+)([A-Za-z_]\w*)\s*;)" );
+	std::string stripped = StripComments( code );
+	auto lines           = Lines( stripped );
+	auto orig            = Lines( code );
+	std::string out;
+	int depth = 0;
+	for( size_t li = 0; li < lines.size(); ++li )
+	{
+		std::string result = li < orig.size() ? orig[ li ] : lines[ li ];
+		std::smatch m;
+		if( depth > 0 && std::regex_search( lines[ li ], m, reDecl ) && m.position( 0 ) == 0 )
+		{
+			std::string type = m[ 3 ];
+			std::string init = m[ 1 ].str() + m[ 2 ].str() + type + m[ 4 ].str() + m[ 5 ].str() + " = " + type + "(0);";
+			result           = init + result.substr( (size_t)m.length( 0 ) );
+		}
+		out += result;
+		if( li + 1 < lines.size() )
+			out += '\n';
+		size_t first = lines[ li ].find_first_not_of( " \t" );
+		if( first == std::string::npos || lines[ li ][ first ] != '#' )
+			for( char ch : lines[ li ] )
+			{
+				if( ch == '{' )
+					++depth;
+				else if( ch == '}' )
+					depth = std::max( 0, depth - 1 );
+			}
+	}
+	return out;
 }
 
 std::string ApplyParamRewrites( const std::string& code, const std::vector< UserParam >& params )

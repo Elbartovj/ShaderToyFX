@@ -83,6 +83,19 @@ struct UserParam
 
 static const int kMaxUserParams = 24;
 
+// Slider Resolume (0..1) -> valeur réelle. Le milieu (0.5 = valeur par défaut de tout slider FFGL)
+// donne toujours la valeur d'origine du shader. Pour les plages détectées automatiquement (symétriques
+// autour de cette valeur), c'est exactement une échelle linéaire min..max.
+inline float UserParamValue( const UserParam& p, float n )
+{
+	n       = n < 0.0f ? 0.0f : ( n > 1.0f ? 1.0f : n );
+	float d = p.def < p.minV ? p.minV : ( p.def > p.maxV ? p.maxV : p.def );
+	if( n <= 0.5f )
+		return p.minV + ( n / 0.5f ) * ( d - p.minV );
+	return d + ( ( n - 0.5f ) / 0.5f ) * ( p.maxV - d );
+}
+static const float kUserParamDefaultNorm = 0.5f;
+
 struct ShaderDoc
 {
 	std::string id;// id Shadertoy (6 caractères) si connu
@@ -116,6 +129,9 @@ bool LoadShaderFile( const std::string& path, ShaderDoc& doc, std::string& err )
 void ExtractUserParams( ShaderDoc& doc );
 // Réécrit le code pour transformer les #define / const retenus en uniforms (numéros de ligne conservés)
 std::string ApplyParamRewrites( const std::string& code, const std::vector< UserParam >& params );
+// Initialise à zéro les variables locales déclarées sans valeur (« vec3 c; »), comme WebGL/ANGLE sur
+// Shadertoy : sans ça, certains drivers renvoient des valeurs aléatoires.
+std::string ZeroInitLocals( const std::string& code );
 
 // Re-sérialise le shader (après édition) : JSON si d'origine JSON, sinon GLSL
 std::string SerializeDoc( const ShaderDoc& doc, std::string& extension );
