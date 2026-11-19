@@ -83,6 +83,19 @@ struct UserParam
 
 static const int kMaxUserParams = 24;
 
+// Slider Resolume (0..1) -> valeur réelle. Le milieu du slider (0.5, valeur par défaut de tout
+// paramètre FFGL) correspond toujours à la valeur d'origine du shader : « réinitialiser » dans
+// Resolume remet donc exactement la valeur du shader. 0 -> min, 1 -> max.
+inline float UserParamValue( const UserParam& p, float n )
+{
+	n = n < 0.0f ? 0.0f : ( n > 1.0f ? 1.0f : n );
+	float d = p.def < p.minV ? p.minV : ( p.def > p.maxV ? p.maxV : p.def );
+	if( n <= 0.5f )
+		return p.minV + ( n / 0.5f ) * ( d - p.minV );
+	return d + ( ( n - 0.5f ) / 0.5f ) * ( p.maxV - d );
+}
+static const float kUserParamDefaultNorm = 0.5f;
+
 struct ShaderDoc
 {
 	std::string id;// id Shadertoy (6 caractères) si connu

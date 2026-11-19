@@ -113,7 +113,7 @@ Un fichier `.glsl` contient une passe Image avec `mainImage()`, comme sur Shader
 
 Ainsi, la plupart des shaders Shadertoy deviennent réglables sans modification. Sont volontairement exclues les valeurs qui doivent rester constantes en GLSL : taille de tableau, `#if`, `case`, initialisation d'une autre constante ou d'une variable globale, ainsi que PI/TAU et les valeurs inutilisées. Si un cas particulier empêche quand même la compilation, ShaderToyFX retire le paramètre fautif et l'indique en bas de la fenêtre.
 
-La plage par défaut va de 0 au double de la valeur d'origine, et le slider démarre sur la valeur d'origine. Pour fixer une plage, ajoute `// min max défaut` en fin de ligne. L'onglet ÉDITEUR liste les paramètres détectés, sous « Paramètres réglables dans Resolume ».
+La plage par défaut va de 0 au double de la valeur d'origine. **Le milieu du slider correspond toujours à la valeur d'origine du shader** : à l'import de l'effet, chaque slider affiche donc les valeurs du shader, et *réinitialiser* un paramètre dans Resolume (double-clic) remet exactement la valeur du shader. Gauche = minimum, droite = maximum. Pour fixer une plage, ajoute `// min max défaut` en fin de ligne. L'onglet ÉDITEUR liste les paramètres détectés, sous « Paramètres réglables dans Resolume ».
 
 ```glsl
 uniform float zoom;      // 0.5 8 3
