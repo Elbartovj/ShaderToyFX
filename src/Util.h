@@ -68,6 +68,12 @@ struct Settings
 Settings GetSettings();
 void SaveSettings( const Settings& s );
 
+// Favoris (%APPDATA%\ShaderToyFX\favorites.json) : repérés par le nom de fichier, donc ils
+// suivent un shader rangé dans un autre dossier
+bool IsFavorite( const std::string& path );
+void SetFavorite( const std::string& path, bool on );
+size_t FavoriteCount();
+
 // petit générateur aléatoire thread-safe
 uint32_t RandomU32();
 }//namespace stfx

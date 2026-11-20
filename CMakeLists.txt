@@ -36,7 +36,7 @@ target_link_libraries(imgui PUBLIC d3d11 dxgi d3dcompiler dwmapi imm32 gdi32 use
 # ---- code commun
 set(STFX_SOURCES
     src/Util.cpp src/License.cpp src/Net.cpp src/ShaderDoc.cpp src/Params.cpp src/ShadertoyApi.cpp src/GlslGen.cpp
-    src/Renderer.cpp src/Instance.cpp src/Panel.cpp src/Plugin.cpp src/StbImpl.cpp)
+    src/Renderer.cpp src/Instance.cpp src/Panel.cpp src/Preview.cpp src/Plugin.cpp src/StbImpl.cpp)
 
 function(stfx_plugin target outname)
     add_library(${target} SHARED ${STFX_SOURCES} src/ShaderToyFX.def)

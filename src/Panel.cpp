@@ -4,6 +4,7 @@
 #include "Util.h"
 #include "Net.h"
 #include "License.h"
+#include "Preview.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -26,6 +27,7 @@
 #include <deque>
 #include <ctime>
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam );
@@ -127,6 +129,50 @@ ID3D11ShaderResourceView* CreateTexture( const uint8_t* rgba, int w, int h )
 	g_device->CreateShaderResourceView( tex, nullptr, &srv );
 	tex->Release();
 	return srv;
+}
+
+//------------------------------------------------------------------ aperçu animé (image reçue du thread Preview)
+ID3D11Texture2D* g_previewTex       = nullptr;
+ID3D11ShaderResourceView* g_previewSrv = nullptr;
+int g_previewW = 0, g_previewH = 0;
+uint64_t g_previewSerial = 0;
+Preview::Frame g_previewFrame;
+
+void ReleasePreviewTexture()
+{
+	if( g_previewSrv )
+		g_previewSrv->Release();
+	if( g_previewTex )
+		g_previewTex->Release();
+	g_previewSrv = nullptr;
+	g_previewTex = nullptr;
+	g_previewW = g_previewH = 0;
+}
+
+void UploadPreview()
+{
+	if( !Preview::TakeFrame( g_previewSerial, g_previewFrame ) )
+		return;
+	g_previewSerial = g_previewFrame.serial;
+	if( !g_previewTex || g_previewW != g_previewFrame.w || g_previewH != g_previewFrame.h )
+	{
+		ReleasePreviewTexture();
+		D3D11_TEXTURE2D_DESC desc{};
+		desc.Width            = g_previewFrame.w;
+		desc.Height           = g_previewFrame.h;
+		desc.MipLevels        = 1;
+		desc.ArraySize        = 1;
+		desc.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
+		desc.SampleDesc.Count = 1;
+		desc.Usage            = D3D11_USAGE_DEFAULT;
+		desc.BindFlags        = D3D11_BIND_SHADER_RESOURCE;
+		if( FAILED( g_device->CreateTexture2D( &desc, nullptr, &g_previewTex ) ) )
+			return;
+		g_device->CreateShaderResourceView( g_previewTex, nullptr, &g_previewSrv );
+		g_previewW = g_previewFrame.w;
+		g_previewH = g_previewFrame.h;
+	}
+	g_context->UpdateSubresource( g_previewTex, 0, nullptr, g_previewFrame.rgba.data(), g_previewFrame.w * 4, 0 );
 }
 
 //------------------------------------------------------------------ miniatures
@@ -309,6 +355,9 @@ struct UiState
 	std::string folderFilter = "*";// "*" = tous, "" = racine
 	int licenseFilter        = 0;  // 0 tous, 1 commercial OK, 2 non commercial / interdit, 3 à vérifier
 	std::string newFolderName;
+	bool previewOn = true;
+	int previewRes = 1;// 0 = 160x90, 1 = 256x144, 2 = 384x216
+	float previewW = 0;// largeur de la colonne d'aperçu (0 = défaut)
 
 	// Éditeur
 	uint64_t editorDocVersion = (uint64_t)-1;
@@ -857,6 +906,55 @@ std::vector< std::string > SelectedPaths()
 	return std::vector< std::string >( g_ui->localSel.begin(), g_ui->localSel.end() );
 }
 
+const char* const kFavKey = "\x01" "favoris";// dossier virtuel « Favoris »
+
+// Étoile dessinée (la police de l'interface n'a pas forcément le glyphe ★)
+void DrawStar( ImVec2 p, float size, bool on, bool hov )
+{
+	ImDrawList* dl = ImGui::GetWindowDrawList();
+	ImVec2 c( p.x + size * 0.5f, p.y + size * 0.52f );
+	float R = size * 0.47f, r = R * 0.45f;
+	ImVec2 pts[ 10 ];
+	for( int i = 0; i < 10; ++i )
+	{
+		float a   = -1.5707963f + i * 0.6283185f;
+		float rad = ( i & 1 ) ? r : R;
+		pts[ i ]  = ImVec2( c.x + std::cos( a ) * rad, c.y + std::sin( a ) * rad );
+	}
+	ImU32 gold = IM_COL32( 255, 196, 40, 255 );
+	ImU32 col  = on ? gold : ( hov ? IM_COL32( 220, 220, 220, 255 ) : IM_COL32( 110, 110, 110, 255 ) );
+	if( on )
+		for( int i = 0; i < 10; ++i )
+			dl->AddTriangleFilled( c, pts[ i ], pts[ ( i + 1 ) % 10 ], gold );
+	dl->AddPolyline( pts, 10, col, ImDrawFlags_Closed, 1.2f );
+}
+
+// Étoile cliquable
+bool StarToggle( const char* id, bool on, float size )
+{
+	ImVec2 p     = ImGui::GetCursorScreenPos();
+	bool clicked = ImGui::InvisibleButton( id, ImVec2( size, size ) );
+	bool hov     = ImGui::IsItemHovered();
+	DrawStar( p, size, on, hov );
+	if( hov )
+		ImGui::SetTooltip( on ? "Retirer des favoris" : "Ajouter aux favoris" );
+	return clicked;
+}
+
+// Ajoute / retire des favoris une liste de shaders (tous deviennent favoris si l'un ne l'est pas)
+void ToggleFavorites( const std::vector< std::string >& paths )
+{
+	bool allFav = true;
+	for( auto& p : paths )
+		allFav = allFav && IsFavorite( p );
+	for( auto& p : paths )
+		SetFavorite( p, !allFav );
+	if( paths.size() == 1 )
+		Toast( FileStem( paths[ 0 ] ) + ( allFav ? " retiré des favoris" : " ajouté aux favoris" ) );
+	else
+		Toast( std::to_string( paths.size() ) + ( allFav ? " shaders retirés des favoris" : " shaders ajoutés aux favoris" ) );
+}
+
 void FolderEntry( const char* label, const std::string& key, int count )
 {
 	std::string text = std::string( label ) + "  (" + std::to_string( count ) + ")";
@@ -866,9 +964,116 @@ void FolderEntry( const char* label, const std::string& key, int count )
 	if( key != "*" && ImGui::BeginDragDropTarget() )
 	{
 		if( const ImGuiPayload* pl = ImGui::AcceptDragDropPayload( "STFX_SHADER" ) )
-			MoveShaders( SplitLines( std::string( (const char*)pl->Data, pl->DataSize ) ), key );
+		{
+			auto paths = SplitLines( std::string( (const char*)pl->Data, pl->DataSize ) );
+			if( key == kFavKey )
+			{
+				// déposer sur « Favoris » ajoute aux favoris sans déplacer le fichier
+				for( auto& p : paths )
+					SetFavorite( p, true );
+				Toast( std::to_string( paths.size() ) + " shader(s) ajouté(s) aux favoris" );
+			}
+			else
+				MoveShaders( paths, key );
+		}
 		ImGui::EndDragDropTarget();
 	}
+}
+
+// Colonne d'aperçu animé du shader sélectionné
+void PreviewPane( float paneW, float footer )
+{
+	ImGui::BeginChild( "preview", ImVec2( paneW, -footer ), ImGuiChildFlags_Borders );
+	ImGui::TextDisabled( "APERÇU" );
+
+	// shader à montrer : le dernier cliqué s'il est sélectionné, sinon le seul sélectionné
+	std::string pv;
+	auto& sel = g_ui->localSel;
+	if( !g_ui->localSelected.empty() && sel.count( g_ui->localSelected ) )
+		pv = g_ui->localSelected;
+	else if( sel.size() == 1 )
+		pv = *sel.begin();
+
+	static const int kRes[ 3 ][ 2 ] = { { 160, 90 }, { 256, 144 }, { 384, 216 } };
+	const int* res = kRes[ std::clamp( g_ui->previewRes, 0, 2 ) ];
+	if( !pv.empty() && g_ui->previewOn )
+		Preview::Request( pv, res[ 0 ], res[ 1 ] );
+
+	float iw = ImGui::GetContentRegionAvail().x;
+	float ih = iw * 9.0f / 16.0f;
+	ImVec2 p0 = ImGui::GetCursorScreenPos();
+	ImDrawList* dl = ImGui::GetWindowDrawList();
+	dl->AddRectFilled( p0, ImVec2( p0.x + iw, p0.y + ih ), IM_COL32( 0, 0, 0, 255 ) );
+	Preview::Status st = Preview::GetStatus();
+	bool showImage     = !pv.empty() && g_previewSrv && g_previewFrame.path == pv && !( st.path == pv && ( st.compiling || !st.error.empty() ) );
+	if( showImage )
+		ImGui::Image( ImTextureRef( (ImTextureID)(intptr_t)g_previewSrv ), ImVec2( iw, ih ) );
+	else
+		ImGui::Dummy( ImVec2( iw, ih ) );
+	if( showImage && ImGui::BeginItemTooltip() )
+	{
+		ImGui::TextUnformatted( "Paramètres à leur valeur d'origine. Les effets (shaders qui lisent l'entrée\n"
+								"Resolume) sont montrés sur une image de test." );
+		ImGui::EndTooltip();
+	}
+	if( ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) && !pv.empty() )
+		LoadPath( pv );
+	// message au centre de l'image
+	auto centerText = [ & ]( const char* text, ImU32 col ) {
+		ImVec2 ts = ImGui::CalcTextSize( text, nullptr, false, iw - 16 );
+		dl->AddText( ImGui::GetFont(), ImGui::GetFontSize(), ImVec2( p0.x + ( iw - ts.x ) * 0.5f, p0.y + ( ih - ts.y ) * 0.5f ), col, text, nullptr, iw - 16 );
+	};
+	if( pv.empty() )
+		centerText( "Clique un shader", IM_COL32( 140, 140, 140, 255 ) );
+	else if( !g_ui->previewOn && !showImage )
+		centerText( "Aperçu en pause", IM_COL32( 140, 140, 140, 255 ) );
+	else if( st.path != pv || st.compiling )
+		centerText( "Compilation…", IM_COL32( 200, 200, 200, 255 ) );
+	else if( !st.error.empty() )
+		centerText( "Erreur de compilation", IM_COL32( 255, 110, 110, 255 ) );
+
+	if( !pv.empty() )
+	{
+		bool fav = IsFavorite( pv );
+		if( StarToggle( "##pvfav", fav, ImGui::GetFrameHeight() ) )
+			ToggleFavorites( { pv } );
+		ImGui::SameLine();
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextWrapped( "%s", FileStem( pv ).c_str() );
+
+		if( st.path == pv && !st.error.empty() )
+		{
+			ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.45f, 0.45f, 1.0f ) );
+			ImGui::TextWrapped( "%s", st.error.c_str() );
+			ImGui::PopStyleColor();
+		}
+		else if( st.path == pv && !st.compiling && g_ui->previewOn )
+			ImGui::TextDisabled( "%.0f i/s  ·  %dx%d  ·  %.1f s", st.fps, res[ 0 ], res[ 1 ], st.time );
+
+		if( ImGui::Button( "Charger" ) )
+			LoadPath( pv );
+		ImGui::SameLine();
+		if( ImGui::Button( fav ? "Retirer des favoris" : "Favori" ) )
+			ToggleFavorites( { pv } );
+		ImGui::SameLine();
+		ImGui::BeginDisabled( !g_ui->previewOn );
+		if( ImGui::Button( "Rejouer" ) )
+			Preview::Restart();
+		ImGui::EndDisabled();
+	}
+
+	ImGui::Spacing();
+	ImGui::Checkbox( "Animé", &g_ui->previewOn );
+	if( ImGui::BeginItemTooltip() )
+	{
+		ImGui::TextUnformatted( "Décoche pour figer l'aperçu (n'utilise plus le GPU)." );
+		ImGui::EndTooltip();
+	}
+	ImGui::SameLine();
+	const char* resItems[] = { "160x90", "256x144", "384x216" };
+	ImGui::SetNextItemWidth( -1 );
+	ImGui::Combo( "##pvres", &g_ui->previewRes, resItems, IM_ARRAYSIZE( resItems ) );
+	ImGui::EndChild();
 }
 
 void TabLocal()
@@ -897,8 +1102,9 @@ void TabLocal()
 		g_ui->localDirty = true;
 	ImGui::SameLine();
 	{
-		std::string src = g_ui->folderFilter == "*" ? std::string() : g_ui->folderFilter;
-		std::string lbl = src.empty() ? "Aléatoire (tout)" : "Aléatoire dans « " + src + " »";
+		bool favs       = g_ui->folderFilter == kFavKey;
+		std::string src = g_ui->folderFilter == "*" ? std::string() : favs ? std::string( kRandomFavorites ) : g_ui->folderFilter;
+		std::string lbl = favs ? "Aléatoire dans les favoris" : src.empty() ? "Aléatoire (tout)" : "Aléatoire dans « " + src + " »";
 		if( ImGui::Button( lbl.c_str() ) )
 		{
 			if( SharedPtr t = Target() )
@@ -916,7 +1122,7 @@ void TabLocal()
 	}
 	ImGui::SameLine();
 	if( ImGui::Button( "Ouvrir le dossier" ) )
-		OpenInExplorer( g_ui->folderFilter == "*" || g_ui->folderFilter.empty() ? RootDir() : JoinPath( RootDir(), g_ui->folderFilter ) );
+		OpenInExplorer( g_ui->folderFilter == "*" || g_ui->folderFilter.empty() || g_ui->folderFilter == kFavKey ? RootDir() : JoinPath( RootDir(), g_ui->folderFilter ) );
 
 	float footer = ImGui::GetFrameHeightWithSpacing() * 2 + 8;
 
@@ -924,9 +1130,16 @@ void TabLocal()
 	ImGui::BeginChild( "folders", ImVec2( ImGui::GetFontSize() * 14, -footer ), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeX );
 	ImGui::TextDisabled( "DOSSIERS" );
 	std::map< std::string, int > counts;
+	int favCount = 0;
 	for( auto& e : files )
+	{
 		counts[ e.relFolder ]++;
+		if( IsFavorite( e.path ) )
+			++favCount;
+	}
 	FolderEntry( "Tous", "*", (int)files.size() );
+	FolderEntry( "      Favoris", kFavKey, favCount );
+	DrawStar( ImGui::GetItemRectMin(), ImGui::GetTextLineHeight(), true, false );
 	if( counts.count( "" ) )
 		FolderEntry( "(racine)", "", counts[ "" ] );
 	for( auto& f : g_ui->folders )
@@ -945,7 +1158,7 @@ void TabLocal()
 			g_ui->localDirty = true;
 		}
 	}
-	bool canDelete = g_ui->folderFilter != "*" && !g_ui->folderFilter.empty() && !counts.count( g_ui->folderFilter ) &&
+	bool canDelete = g_ui->folderFilter != "*" && g_ui->folderFilter != kFavKey && !g_ui->folderFilter.empty() && !counts.count( g_ui->folderFilter ) &&
 					 g_ui->folderFilter != "Shadertoy" && g_ui->folderFilter != "Local";
 	ImGui::SameLine();
 	ImGui::BeginDisabled( !canDelete );
@@ -958,7 +1171,7 @@ void TabLocal()
 	}
 	ImGui::EndDisabled();
 	ImGui::PushStyleColor( ImGuiCol_Text, ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled ) );
-	ImGui::TextWrapped( "Glisse un shader sur un dossier pour l'y ranger." );
+	ImGui::TextWrapped( "Glisse un shader sur un dossier pour l'y ranger, ou sur Favoris pour le marquer." );
 	ImGui::PopStyleColor();
 	ImGui::EndChild();
 
@@ -972,7 +1185,12 @@ void TabLocal()
 	{
 		const LocalEntry& e   = files[ i ];
 		const LicenseInfo& li = lics[ i ];
-		if( g_ui->folderFilter != "*" && e.relFolder != g_ui->folderFilter )
+		if( g_ui->folderFilter == kFavKey )
+		{
+			if( !IsFavorite( e.path ) )
+				continue;
+		}
+		else if( g_ui->folderFilter != "*" && e.relFolder != g_ui->folderFilter )
 			continue;
 		if( !filter.empty() && ToLower( e.name ).find( filter ) == std::string::npos && ToLower( li.author ).find( filter ) == std::string::npos )
 			continue;
@@ -992,7 +1210,10 @@ void TabLocal()
 	}
 
 	auto& sel = g_ui->localSel;
-	if( ImGui::BeginTable( "local", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable, ImVec2( 0, -footer ) ) )
+	float previewPaneW = std::max( ImGui::GetFontSize() * 17.0f, 270.0f );
+	bool tableOpen     = ImGui::BeginTable( "local", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable,
+										ImVec2( -( previewPaneW + ImGui::GetStyle().ItemSpacing.x ), -footer ) );
+	if( tableOpen )
 	{
 		// Ctrl+A : tout sélectionner (liste visible)
 		if( ImGui::IsWindowFocused( ImGuiFocusedFlags_RootAndChildWindows ) && !ImGui::GetIO().WantTextInput &&
@@ -1001,6 +1222,7 @@ void TabLocal()
 				sel.insert( files[ i ].path );
 
 		ImGui::TableSetupScrollFreeze( 0, 1 );
+		ImGui::TableSetupColumn( "", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoResize, ImGui::GetTextLineHeight() );
 		ImGui::TableSetupColumn( "NOM", ImGuiTableColumnFlags_WidthStretch );
 		ImGui::TableSetupColumn( "LICENCE", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 12 );
 		ImGui::TableSetupColumn( "AUTEUR", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 7 );
@@ -1012,9 +1234,9 @@ void TabLocal()
 			const LicenseInfo& li = lics[ visible[ vi ] ];
 			bool isSel            = sel.count( e.path ) > 0;
 			ImGui::TableNextRow();
-			ImGui::TableNextColumn();
+			ImGui::TableSetColumnIndex( 1 );
 			ImGui::PushID( e.path.c_str() );
-			if( ImGui::Selectable( e.name.c_str(), isSel, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick ) )
+			if( ImGui::Selectable( e.name.c_str(), isSel, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick | ImGuiSelectableFlags_AllowOverlap ) )
 			{
 				ImGuiIO& io = ImGui::GetIO();
 				if( io.KeyShift && !g_ui->localAnchor.empty() )
@@ -1074,6 +1296,13 @@ void TabLocal()
 				int n = (int)sel.size();
 				if( ImGui::MenuItem( "Charger", nullptr, false, n == 1 ) )
 					LoadPath( e.path );
+				{
+					bool allFav = true;
+					for( auto& p : sel )
+						allFav = allFav && IsFavorite( p );
+					if( ImGui::MenuItem( allFav ? "Retirer des favoris" : "Ajouter aux favoris" ) )
+						ToggleFavorites( SelectedPaths() );
+				}
 				std::string moveLabel = n > 1 ? "Déplacer les " + std::to_string( n ) + " shaders vers" : std::string( "Déplacer vers" );
 				if( ImGui::BeginMenu( moveLabel.c_str() ) )
 				{
@@ -1090,7 +1319,11 @@ void TabLocal()
 					g_ui->confirmRecycle = true;
 				ImGui::EndPopup();
 			}
-			ImGui::TableNextColumn();
+			// étoile (soumise après la ligne pour rester cliquable par-dessus)
+			ImGui::TableSetColumnIndex( 0 );
+			if( StarToggle( "##fav", IsFavorite( e.path ), ImGui::GetTextLineHeight() ) )
+				ToggleFavorites( { e.path } );
+			ImGui::TableSetColumnIndex( 2 );
 			LicenseBadge( li );
 			ImGui::TableNextColumn();
 			ImGui::TextUnformatted( li.author.c_str() );
@@ -1100,6 +1333,9 @@ void TabLocal()
 		}
 		ImGui::EndTable();
 	}
+	if( tableOpen )
+		ImGui::SameLine();
+	PreviewPane( previewPaneW, footer );
 
 	// confirmation corbeille
 	if( g_ui->confirmRecycle )
@@ -1147,6 +1383,14 @@ void TabLocal()
 			if( ImGui::Selectable( f.c_str() ) )
 				MoveShaders( SelectedPaths(), f );
 		ImGui::EndCombo();
+	}
+	ImGui::SameLine();
+	if( ImGui::Button( "Favoris ±" ) )
+		ToggleFavorites( SelectedPaths() );
+	if( ImGui::BeginItemTooltip() )
+	{
+		ImGui::TextUnformatted( "Ajoute la sélection aux favoris (ou l'en retire si tout y est déjà)." );
+		ImGui::EndTooltip();
 	}
 	ImGui::SameLine();
 	if( ImGui::Button( "Corbeille…" ) )
@@ -1641,6 +1885,7 @@ void PanelThread()
 			CreateRTV();
 		}
 		UploadThumbs();
+		UploadPreview();
 
 		ImGui_ImplDX11_NewFrame();
 		ImGui_ImplWin32_NewFrame();
@@ -1658,6 +1903,8 @@ void PanelThread()
 
 	KillTimer( hwnd, 1 );
 	g_hwnd = nullptr;
+	Preview::Shutdown();
+	ReleasePreviewTexture();
 	ReleaseThumbs();
 	ImGui_ImplDX11_Shutdown();
 	ImGui_ImplWin32_Shutdown();

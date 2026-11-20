@@ -57,5 +57,6 @@ const char* BookmarkletCode();
 // Source du tirage aléatoire : "" = toute la bibliothèque locale, kRandomOnline = Shadertoy (clé API),
 // sinon un dossier relatif à Documents\ShaderToyFX (sous-dossiers compris)
 extern const char* const kRandomOnline;
+extern const char* const kRandomFavorites;// shaders marqués favoris (tous dossiers)
 bool PickRandomShader( const std::string& source, const std::string& excludePath, std::string& path, std::string& title, std::string& err );
 }//namespace stfx

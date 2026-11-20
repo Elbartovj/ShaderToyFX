@@ -105,7 +105,7 @@ void RequestRandom( const SharedPtr& s, const std::string& source )
 		if( s->current )
 			exclude = s->current->sourcePath;// évite de retomber sur le shader en cours
 	}
-	std::string label = source.empty() ? "bibliothèque" : source == kRandomOnline ? "Shadertoy" : source;
+	std::string label = source.empty() ? "bibliothèque" : source == kRandomOnline ? "Shadertoy" : source == kRandomFavorites ? "favoris" : source;
 	RunAsync( s, "Aléatoire (" + label + ")…", [ source, exclude ]( ShaderDoc& doc, std::string& err, bool& user ) {
 		user = true;
 		std::string path, title;

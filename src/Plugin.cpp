@@ -223,6 +223,7 @@ void ShaderToyFX::RefreshRandomSources( bool force, bool raiseEvents )
 	std::vector< std::string > sources = { "" };
 	if( !Trim( GetSettings().apiKey ).empty() )
 		sources.push_back( kRandomOnline );
+	sources.push_back( kRandomFavorites );
 	for( auto& f : ListFolders() )
 		sources.push_back( f );
 	// un dossier choisi mais absent (renommé ?) reste dans la liste pour ne pas perdre le réglage
@@ -238,7 +239,7 @@ void ShaderToyFX::RefreshRandomSources( bool force, bool raiseEvents )
 		for( size_t i = 0; i < sources.size(); ++i )
 		{
 			const std::string& src = sources[ i ];
-			names.push_back( src.empty() ? "Bibliothèque (tout)" : src == kRandomOnline ? "Shadertoy en ligne" : src );
+			names.push_back( src.empty() ? "Bibliothèque (tout)" : src == kRandomOnline ? "Shadertoy en ligne" : src == kRandomFavorites ? "Favoris" : src );
 			vals.push_back( (float)i );
 		}
 		SetParamElements( PT_RANDOM_FROM, names, vals, raiseEvents );

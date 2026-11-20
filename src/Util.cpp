@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <set>
 #include <algorithm>
 #include <nlohmann/json.hpp>
 
@@ -392,6 +393,66 @@ void SaveSettings( const Settings& s )
 	j[ "watchDownloads" ]  = s.watchDownloads;
 	j[ "autoLoadDownloads" ] = s.autoLoadDownloads;
 	WriteFileText( SettingsPath(), j.dump( 2 ) );
+}
+
+//------------------------------------------------------------------ favoris
+static std::mutex s_favMutex;
+static bool s_favLoaded = false;
+static std::set< std::string > s_favorites;
+
+static std::string FavKey( const std::string& path )
+{
+	std::string p = path;
+	size_t slash  = p.find_last_of( "/\\" );
+	if( slash != std::string::npos )
+		p = p.substr( slash + 1 );
+	return ToLower( p );
+}
+static std::string FavoritesPath()
+{
+	std::string settings = SettingsPath();
+	return JoinPath( ParentDir( settings ), "favorites.json" );
+}
+static void LoadFavoritesLocked()
+{
+	if( s_favLoaded )
+		return;
+	s_favLoaded = true;
+	std::string text;
+	if( ReadFileText( FavoritesPath(), text ) )
+	{
+		auto j = nlohmann::json::parse( text, nullptr, false );
+		if( j.is_array() )
+			for( auto& v : j )
+				if( v.is_string() )
+					s_favorites.insert( ToLower( v.get< std::string >() ) );
+	}
+}
+bool IsFavorite( const std::string& path )
+{
+	std::lock_guard< std::mutex > lock( s_favMutex );
+	LoadFavoritesLocked();
+	return s_favorites.count( FavKey( path ) ) > 0;
+}
+void SetFavorite( const std::string& path, bool on )
+{
+	std::lock_guard< std::mutex > lock( s_favMutex );
+	LoadFavoritesLocked();
+	if( on )
+		s_favorites.insert( FavKey( path ) );
+	else
+		s_favorites.erase( FavKey( path ) );
+	nlohmann::json j = nlohmann::json::array();
+	for( auto& f : s_favorites )
+		j.push_back( f );
+	MakeDirs( ParentDir( FavoritesPath() ) );
+	WriteFileText( FavoritesPath(), j.dump( 2 ) );
+}
+size_t FavoriteCount()
+{
+	std::lock_guard< std::mutex > lock( s_favMutex );
+	LoadFavoritesLocked();
+	return s_favorites.size();
 }
 
 uint32_t RandomU32()

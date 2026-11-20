@@ -61,7 +61,9 @@ Sans clé, le bouton **Rechercher** ouvre la recherche dans ton navigateur, et *
   - Colonne de gauche : tes dossiers (*Créer*, *Supprimer* un dossier vide). Glisse un shader sur un dossier pour l'y ranger, ou utilise *Déplacer vers…* ou le clic droit. **Sélection multiple** : Ctrl+clic (ajouter/retirer), Maj+clic (plage), Ctrl+A (tout) ; on glisse alors toute la sélection d'un coup.
   - Colonne **LICENCE** : *Commercial OK* (CC0, domaine public, MIT, BSD…), *Commercial (créditer)* (CC BY, CC BY-SA), *Non commercial* (CC BY-NC…, ou aucune mention sur Shadertoy, la licence par défaut étant CC BY-NC-SA 3.0), *Interdit* (« all rights reserved »…), *À vérifier* (mention ambiguë ou pas de licence dans un shader local). Survole le badge pour voir la ligne du code qui a servi à décider. Le filtre de licence permet de n'afficher que les shaders utilisables commercialement.
   - La détection est **automatique et indicative** : elle lit les commentaires du code et la description. Avant un usage commercial, relis toujours le texte de la licence. Ce n'est pas un avis juridique.
-  - Le bouton **Aléatoire dans « dossier »** charge un shader au hasard dans le dossier sélectionné.
+  - **Aperçu** (colonne de droite) : le shader sélectionné tourne en direct en basse résolution (160x90, 256x144 ou 384x216), avec les paramètres à leur valeur d'origine. Les effets qui lisent l'entrée Resolume sont montrés sur une image de test. Le rendu se fait dans un contexte OpenGL à part, sur son propre thread : il ne touche pas au rendu de Resolume. Décoche *Animé* pour le figer, et il s'arrête tout seul quand l'onglet ou le panneau est fermé. Double-clic sur l'aperçu pour charger le shader.
+  - **Favoris** : clique l'étoile d'une ligne ou de l'aperçu, utilise le clic droit ou *Favoris ±* pour toute une sélection, ou glisse des shaders sur **Favoris** dans la colonne des dossiers. Le dossier virtuel *Favoris* liste les favoris de tous les dossiers. Un favori le reste s'il change de dossier (il est repéré par son nom de fichier).
+  - Le bouton **Aléatoire dans « dossier »** charge un shader au hasard dans le dossier sélectionné, y compris *Favoris*. Dans Resolume, *Random From* propose aussi **Favoris**.
   - Un shader déplacé reste retrouvé par les compositions Resolume existantes (recherche par nom de fichier dans la bibliothèque).
 - **ÉDITEUR** : édition en direct de chaque passe. *Appliquer* (Ctrl+Entrée) recompile sans perdre le shader en cours si une erreur survient. *Enregistrer* (Ctrl+S) écrit le fichier et met à jour le paramètre Shader.
 - **PRÉFÉRENCES** : clé API, nombre de résultats par page, option « toujours au premier plan ».
@@ -78,6 +80,7 @@ Documents\ShaderToyFX\
   Local\       <- tes shaders et le code collé
   media\       <- textures, cubemaps, volumes et miniatures en cache
 %APPDATA%\ShaderToyFX\settings.json   <- clé API et préférences
+%APPDATA%\ShaderToyFX\favorites.json  <- shaders favoris
 ```
 
 Un shader téléchargé est enregistré en `.json` et c'est ce fichier qui est stocké dans la composition. Le set fonctionne donc ensuite sans connexion.
@@ -162,6 +165,7 @@ cmake -B build -DCMAKE_TOOLCHAIN_FILE=mingw.cmake -DCMAKE_BUILD_TYPE=Release && 
 | `src/ShadertoyApi.*` | API REST Shadertoy (shader, recherche, liste complète), cache disque |
 | `src/Net.*` | HTTPS via WinHTTP |
 | `src/Instance.*` | État partagé et thread-safe de chaque instance, chargements asynchrones, registre des instances |
+| `src/Preview.*` | Aperçu animé de la bibliothèque : contexte WGL caché sur un thread dédié, rendu basse résolution relu vers le panneau |
 | `src/Panel.*` | Fenêtre *Shader Library* : thread dédié, Win32, Direct3D 11 et Dear ImGui, sans toucher au contexte GL de Resolume |
 
 Les téléchargements et le décodage d'images se font sur des threads de travail. Seule la compilation GL a lieu dans `ProcessOpenGL`. Si un shader ne compile pas, le précédent reste affiché.

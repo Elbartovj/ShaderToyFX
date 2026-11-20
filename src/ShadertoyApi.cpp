@@ -330,6 +330,7 @@ const char* BookmarkletCode()
 }
 
 const char* const kRandomOnline = "*online*";
+const char* const kRandomFavorites = "*favoris*";
 
 bool PickRandomShader( const std::string& source, const std::string& excludePath, std::string& path, std::string& title, std::string& err )
 {
@@ -364,17 +365,20 @@ bool PickRandomShader( const std::string& source, const std::string& excludePath
 	}
 
 	// tirage local : toute la bibliothèque ou un dossier (sous-dossiers compris)
-	std::string dir = source.empty() ? RootDir() : JoinPath( RootDir(), source );
+	bool favs       = source == kRandomFavorites;
+	std::string dir = source.empty() || favs ? RootDir() : JoinPath( RootDir(), source );
 	auto files      = ListShaderFiles( dir );
 	std::vector< LocalEntry > valid;
 	for( auto& f : files )
-		if( f.name.rfind( "_", 0 ) != 0 )
+		if( f.name.rfind( "_", 0 ) != 0 && ( !favs || IsFavorite( f.path ) ) )
 			valid.push_back( f );
 	if( valid.size() > 1 && !excludePath.empty() )
 		valid.erase( std::remove_if( valid.begin(), valid.end(), [ & ]( const LocalEntry& f ) { return ToLower( f.path ) == ToLower( excludePath ); } ), valid.end() );
 	if( valid.empty() )
 	{
-		err = source.empty() ? "La bibliothèque est vide : importe d'abord des shaders." : "Le dossier « " + source + " » ne contient aucun shader.";
+		err = source.empty() ? "La bibliothèque est vide : importe d'abord des shaders."
+			  : favs       ? "Aucun favori : clique l'étoile d'un shader dans la BIBLIOTHÈQUE."
+						   : "Le dossier « " + source + " » ne contient aucun shader.";
 		return false;
 	}
 	auto& f = valid[ RandomU32() % valid.size() ];
