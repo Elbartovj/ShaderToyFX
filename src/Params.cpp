@@ -706,6 +706,16 @@ void ExtractUserParams( ShaderDoc& doc )
 			continue;
 		if( c.name.rfind( "KEY_", 0 ) == 0 )
 			continue;// code de touche clavier
+		{
+			// identifiants numérotés dont la valeur est le numéro : seg_0 0, num_3 3… (énumération)
+			static const std::regex reEnum( R"(^[A-Za-z_]\w*?_?(\d+)$)" );
+			static const std::regex reTrig( R"(^(deg|rad|degree|radian)s?_?\d+$)", std::regex::icase );
+			std::smatch em;
+			if( c.isInt && c.vecSize == 1 && std::regex_match( c.name, em, reEnum ) && std::stoi( em[ 1 ] ) == (int)c.values[ 0 ] )
+				continue;
+			if( std::regex_match( c.name, reTrig ) )
+				continue;
+		}
 		if( c.vecSize > 1 && std::all_of( c.values.begin(), c.values.end(), []( float v ) { return v == 0.0f || v == 1.0f || v == -1.0f; } ) )
 			continue;// vecteur de direction / décalage de voisinage, pas un réglage
 		done.insert( c.name );
@@ -755,13 +765,19 @@ std::string ZeroInitLocals( const std::string& code )
 	std::string stripped = StripComments( code );
 	auto lines           = Lines( stripped );
 	auto orig            = Lines( code );
+	static const std::regex reStruct( R"(\bstruct\b)" );
 	std::string out;
-	int depth = 0;
+	int depth        = 0;
+	int structDepth  = -1;// profondeur du corps de struct en cours (-1 = aucun)
+	bool structOpen  = false;
 	for( size_t li = 0; li < lines.size(); ++li )
 	{
 		std::string result = li < orig.size() ? orig[ li ] : lines[ li ];
 		std::smatch m;
-		if( depth > 0 && std::regex_search( lines[ li ], m, reDecl ) && m.position( 0 ) == 0 )
+		bool inStruct = structDepth >= 0 && depth >= structDepth;
+		if( std::regex_search( lines[ li ], reStruct ) )
+			structOpen = true;
+		if( !inStruct && depth > 0 && std::regex_search( lines[ li ], m, reDecl ) && m.position( 0 ) == 0 )
 		{
 			std::string type = m[ 3 ];
 			std::string init = m[ 1 ].str() + m[ 2 ].str() + type + m[ 4 ].str() + m[ 5 ].str() + " = " + type + "(0);";
@@ -775,12 +791,31 @@ std::string ZeroInitLocals( const std::string& code )
 			for( char ch : lines[ li ] )
 			{
 				if( ch == '{' )
+				{
 					++depth;
+					if( structOpen )
+					{
+						structDepth = depth;
+						structOpen  = false;
+					}
+				}
 				else if( ch == '}' )
+				{
+					if( structDepth >= 0 && depth == structDepth )
+						structDepth = -1;
 					depth = std::max( 0, depth - 1 );
+				}
 			}
 	}
 	return out;
+}
+
+std::string RenameReservedWords( const std::string& code )
+{
+	// mots libres en GLSL ES 3.00 (WebGL2, Shadertoy) mais réservés en GLSL desktop / par certains
+	// drivers (NVIDIA) : « int char », « vec3 sample(...) », « float buffer »…
+	static const std::regex re( R"(\b(char|sample|buffer|shared|precise|patch|subroutine|common|partition|active|filter|input|output|dmat2|dmat3|dmat4|dmat2x2|dmat2x3|dmat2x4|dmat3x2|dmat3x3|dmat3x4|dmat4x2|dmat4x3|dmat4x4)\b)" );
+	return std::regex_replace( code, re, "stfx_r_$1" );
 }
 
 std::string ApplyParamRewrites( const std::string& code, const std::vector< UserParam >& params )

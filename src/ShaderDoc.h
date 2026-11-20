@@ -132,6 +132,8 @@ std::string ApplyParamRewrites( const std::string& code, const std::vector< User
 // Initialise à zéro les variables locales déclarées sans valeur (« vec3 c; »), comme WebGL/ANGLE sur
 // Shadertoy : sans ça, certains drivers renvoient des valeurs aléatoires.
 std::string ZeroInitLocals( const std::string& code );
+// Renomme les identifiants autorisés en WebGL2 mais réservés en GLSL desktop (char, sample, buffer…)
+std::string RenameReservedWords( const std::string& code );
 
 // Re-sérialise le shader (après édition) : JSON si d'origine JSON, sinon GLSL
 std::string SerializeDoc( const ShaderDoc& doc, std::string& extension );
