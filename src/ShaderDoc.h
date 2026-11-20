@@ -134,6 +134,8 @@ std::string ApplyParamRewrites( const std::string& code, const std::vector< User
 std::string ZeroInitLocals( const std::string& code );
 // Renomme les identifiants autorisés en WebGL2 mais réservés en GLSL desktop (char, sample, buffer…)
 std::string RenameReservedWords( const std::string& code );
+// pow() -> stfx_pow() dans le corps des fonctions (hors initialisations constantes)
+std::string RewritePowCalls( const std::string& code );
 
 // Re-sérialise le shader (après édition) : JSON si d'origine JSON, sinon GLSL
 std::string SerializeDoc( const ShaderDoc& doc, std::string& extension );

@@ -810,6 +810,39 @@ std::string ZeroInitLocals( const std::string& code )
 	return out;
 }
 
+std::string RewritePowCalls( const std::string& code )
+{
+	// pow( -x, entier ) -> stfx_pow, seulement dans le corps des fonctions et hors « const » :
+	// une initialisation constante (const float t[] = float[]( pow(…) )) doit garder le pow() natif
+	static const std::regex rePow( R"(\bpow(\s*\())" );
+	static const std::regex reConst( R"(\bconst\b)" );
+	std::string stripped = StripComments( code );
+	auto lines           = Lines( stripped );
+	auto orig            = Lines( code );
+	std::string out;
+	int depth = 0;
+	for( size_t li = 0; li < lines.size(); ++li )
+	{
+		std::string result = li < orig.size() ? orig[ li ] : lines[ li ];
+		size_t first       = lines[ li ].find_first_not_of( " \t" );
+		bool pre           = first != std::string::npos && lines[ li ][ first ] == '#';
+		if( depth > 0 && !pre && !std::regex_search( lines[ li ], reConst ) )
+			result = std::regex_replace( result, rePow, "stfx_pow$1" );
+		out += result;
+		if( li + 1 < lines.size() )
+			out += '\n';
+		if( !pre )
+			for( char ch : lines[ li ] )
+			{
+				if( ch == '{' )
+					++depth;
+				else if( ch == '}' )
+					depth = std::max( 0, depth - 1 );
+			}
+	}
+	return out;
+}
+
 std::string RenameReservedWords( const std::string& code )
 {
 	// mots libres en GLSL ES 3.00 (WebGL2, Shadertoy) mais réservés en GLSL desktop / par certains
