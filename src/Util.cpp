@@ -186,6 +186,7 @@ std::string RootDir()
 }
 std::string ShadertoyCacheDir() { return JoinPath( RootDir(), "Shadertoy" ); }
 std::string LocalDir() { return JoinPath( RootDir(), "Local" ); }
+std::string ShaderedDir() { return JoinPath( RootDir(), "SHADERed" ); }
 std::string MediaDir() { return JoinPath( RootDir(), "media" ); }
 
 std::string DownloadsDir()
@@ -205,6 +206,27 @@ std::string DownloadsDir()
 	return dir;
 }
 
+// Un dossier qui contient un .sprj est un projet SHADERed : il compte comme une seule entrée
+static bool IsProjectDir( const fs::path& d )
+{
+	std::error_code ec;
+	for( auto& f : fs::directory_iterator( d, fs::directory_options::skip_permission_denied, ec ) )
+		if( f.is_regular_file( ec ) && ToLower( Narrow( f.path().extension().wstring() ) ) == ".sprj" )
+			return true;
+	return false;
+}
+
+bool IsShaderedProjectFile( const std::string& path )
+{
+	return FileExtLower( path ) == ".sprj";
+}
+
+bool IsLibraryShaderExt( const std::string& ext )
+{
+	return ext == ".json" || ext == ".glsl" || ext == ".frag" || ext == ".txt" || ext == ".fs" || ext == ".sprj" || ext == ".gdshader" ||
+		   ext == ".shader";
+}
+
 std::vector< LocalEntry > ListShaderFiles( const std::string& dir )
 {
 	std::vector< LocalEntry > out;
@@ -216,14 +238,41 @@ std::vector< LocalEntry > ListShaderFiles( const std::string& dir )
 	{
 		if( ec )
 			break;
+		if( it->is_directory( ec ) )
+		{
+			std::string relD = Narrow( fs::relative( it->path(), root, ec ).wstring() );
+			if( relD == "media" )
+			{
+				it.disable_recursion_pending();
+				continue;
+			}
+			// projet SHADERed : seul le .sprj est listé (pas ses fichiers de shaders)
+			if( IsProjectDir( it->path() ) )
+			{
+				it.disable_recursion_pending();
+				for( auto& f : fs::directory_iterator( it->path(), fs::directory_options::skip_permission_denied, ec ) )
+				{
+					if( !f.is_regular_file( ec ) || ToLower( Narrow( f.path().extension().wstring() ) ) != ".sprj" )
+						continue;
+					LocalEntry e;
+					e.path = Narrow( f.path().wstring() );
+					// nom du dossier du projet (« Titre [id] ») plutôt que « project »
+					e.name   = Narrow( it->path().filename().wstring() );
+					e.folder = Narrow( it->path().parent_path().filename().wstring() );
+					std::error_code ec2;
+					auto relDir = fs::relative( it->path().parent_path(), root, ec2 );
+					e.relFolder = ( ec2 || relDir == "." ) ? std::string() : Narrow( relDir.wstring() );
+					auto t      = fs::last_write_time( f.path(), ec );
+					e.modified  = (int64_t)t.time_since_epoch().count();
+					out.push_back( std::move( e ) );
+				}
+			}
+			continue;
+		}
 		if( !it->is_regular_file( ec ) )
 			continue;
 		std::string ext = ToLower( Narrow( it->path().extension().wstring() ) );
-		if( ext != ".json" && ext != ".glsl" && ext != ".frag" && ext != ".txt" && ext != ".fs" )
-			continue;
-		// ignore le dossier media
-		std::string rel = Narrow( fs::relative( it->path(), root, ec ).wstring() );
-		if( rel.rfind( "media", 0 ) == 0 )
+		if( !IsLibraryShaderExt( ext ) || ext == ".sprj" )
 			continue;
 		LocalEntry e;
 		e.path   = Narrow( it->path().wstring() );
@@ -254,7 +303,7 @@ std::vector< std::string > ListFolders()
 		if( !it->is_directory( ec ) )
 			continue;
 		std::string rel = Narrow( fs::relative( it->path(), root, ec ).wstring() );
-		if( rel == "media" || rel.rfind( "media\\", 0 ) == 0 || rel.rfind( "media/", 0 ) == 0 )
+		if( rel == "media" || rel.rfind( "media\\", 0 ) == 0 || rel.rfind( "media/", 0 ) == 0 || IsProjectDir( it->path() ) )
 		{
 			it.disable_recursion_pending();
 			continue;
@@ -271,6 +320,25 @@ std::string MoveToFolder( const std::string& file, const std::string& relFolder 
 	fs::path src = P( file );
 	fs::path dir = relFolder.empty() ? P( RootDir() ) : P( RootDir() ) / P( relFolder );
 	fs::create_directories( dir, ec );
+	if( IsShaderedProjectFile( file ) )
+	{
+		fs::path projDir = src.parent_path();
+		if( projDir.parent_path() == dir )
+			return file;
+		fs::path dstDir = dir / projDir.filename();
+		for( int n = 2; fs::exists( dstDir, ec ); ++n )
+			dstDir = dir / ( projDir.filename().wstring() + L" (" + std::to_wstring( n ) + L")" );
+		fs::rename( projDir, dstDir, ec );
+		if( ec )
+		{
+			ec.clear();
+			fs::copy( projDir, dstDir, fs::copy_options::recursive, ec );
+			if( ec )
+				return {};
+			fs::remove_all( projDir, ec );
+		}
+		return Narrow( ( dstDir / src.filename() ).wstring() );
+	}
 	if( src.parent_path() == dir )
 		return file;
 	fs::path dst = dir / src.filename();
@@ -291,7 +359,7 @@ std::string MoveToFolder( const std::string& file, const std::string& relFolder 
 bool RecycleFile( const std::string& file )
 {
 #ifdef _WIN32
-	std::wstring from = Widen( file );
+	std::wstring from = Widen( IsShaderedProjectFile( file ) ? ParentDir( file ) : file );
 	from.push_back( L'\0' );// double terminaison requise
 	SHFILEOPSTRUCTW op{};
 	op.wFunc  = FO_DELETE;
@@ -309,13 +377,16 @@ std::string FindByFileName( const std::string& missingPath )
 	std::string name = ToLower( Narrow( P( missingPath ).filename().wstring() ) );
 	if( name.empty() )
 		return {};
+	// projet SHADERed : le nom du dossier identifie le projet (« Titre [id]/project.sprj »)
+	std::string parentName = IsShaderedProjectFile( missingPath ) ? ToLower( Narrow( P( missingPath ).parent_path().filename().wstring() ) ) : std::string();
 	std::error_code ec;
 	fs::path root = P( RootDir() );
 	for( auto it = fs::recursive_directory_iterator( root, fs::directory_options::skip_permission_denied, ec ); it != fs::recursive_directory_iterator(); it.increment( ec ) )
 	{
 		if( ec )
 			break;
-		if( it->is_regular_file( ec ) && ToLower( Narrow( it->path().filename().wstring() ) ) == name )
+		if( it->is_regular_file( ec ) && ToLower( Narrow( it->path().filename().wstring() ) ) == name &&
+			( parentName.empty() || ToLower( Narrow( it->path().parent_path().filename().wstring() ) ) == parentName ) )
 			return Narrow( it->path().wstring() );
 	}
 	return {};
@@ -404,6 +475,14 @@ static std::string FavKey( const std::string& path )
 {
 	std::string p = path;
 	size_t slash  = p.find_last_of( "/\\" );
+	// projet SHADERed : « dossier/fichier.sprj » (plusieurs projets ont le même nom de fichier)
+	if( slash != std::string::npos && IsShaderedProjectFile( path ) )
+	{
+		size_t prev = slash > 0 ? p.find_last_of( "/\\", slash - 1 ) : std::string::npos;
+		p           = p.substr( prev == std::string::npos ? 0 : prev + 1 );
+		std::replace( p.begin(), p.end(), '\\', '/' );
+		return ToLower( p );
+	}
 	if( slash != std::string::npos )
 		p = p.substr( slash + 1 );
 	return ToLower( p );

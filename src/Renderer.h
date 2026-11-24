@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include "ShaderDoc.h"
+#include <memory>
 
 namespace stfx
 {
@@ -44,9 +45,16 @@ enum ChannelOverride
 	CH_MODE_COUNT
 };
 
+namespace sed
+{
+class Renderer;
+}
+
 class Renderer
 {
 public:
+	Renderer();
+	~Renderer();
 	bool InitGL();
 	void DeInitGL();
 
@@ -58,7 +66,9 @@ public:
 	void ResetBuffers();
 	// Image choisie par l'utilisateur pour iChannelN (nullptr = aucune)
 	void SetChannelImage( int ch, const ImageData* img );
-	bool HasProgram() const { return !passes.empty(); }
+	bool HasProgram() const { return !passes.empty() || sedRenderer; }
+	// projet SHADERed actif : noms des textures remplaçables par les paramètres Input
+	std::vector< std::string > ShaderedTextureNames() const;
 
 private:
 	struct Channel
@@ -105,6 +115,12 @@ private:
 		int param[ 4 ] = { -1, -1, -1, -1 };// index dans FrameInputs::user pour chaque composante
 	};
 	bool BuildOnce( const ShaderDoc& doc, std::string& log );
+	bool BuildShadertoy( ShaderDoc& doc, std::string& log );
+	// projets SHADERed / shaders Godot
+	std::unique_ptr< sed::Renderer > sedRenderer;
+	void RenderShadered( const FrameInputs& in );
+	GLuint compositeProgram = 0;
+	GLint uCompTex = -1, uCompSize = -1, uCompOffset = -1, uCompForceAlpha = -1, uCompMask = -1;
 	std::vector< UserUniform > userUniforms;
 	std::vector< Pass > passes;
 	std::vector< GLuint > ownedTextures;

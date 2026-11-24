@@ -1,5 +1,6 @@
 #include "Renderer.h"
 #include "GlslGen.h"
+#include "sed/SedRenderer.h"
 #include <algorithm>
 #include <cstring>
 #include <cstdio>
@@ -162,6 +163,14 @@ void Renderer::SetChannelImage( int ch, const ImageData* img )
 
 void Renderer::DeInitGL()
 {
+	if( sedRenderer )
+	{
+		sedRenderer->Release();
+		sedRenderer.reset();
+	}
+	if( compositeProgram )
+		glDeleteProgram( compositeProgram );
+	compositeProgram = 0;
 	DestroyPasses( passes, ownedTextures );
 	DestroyBuffers();
 	GLuint t[] = { audioTex, keyboardTex, black2D, blackCube, black3D };
@@ -216,6 +225,8 @@ void Renderer::DestroyBuffers()
 
 void Renderer::ResetBuffers()
 {
+	if( sedRenderer )
+		sedRenderer->ResetTime();
 	bool mips[ 4 ];
 	for( int i = 0; i < 4; ++i )
 		mips[ i ] = buffers[ i ].wantMips;
@@ -303,7 +314,44 @@ static void ConfigureSampler( GLuint s, ChannelKind kind, Filter filter, bool re
 	glSamplerParameteri( s, GL_TEXTURE_WRAP_R, wrap );
 }
 
+Renderer::Renderer()  = default;
+Renderer::~Renderer() = default;
+
+std::vector< std::string > Renderer::ShaderedTextureNames() const
+{
+	return sedRenderer ? sedRenderer->ReplaceableTextures() : std::vector< std::string >();
+}
+
 bool Renderer::Build( ShaderDoc& doc, std::string& log )
+{
+	if( doc.IsShadered() )
+	{
+		// nouveau moteur construit à part : l'ancien shader reste actif si la compilation échoue
+		auto fresh = std::make_unique< sed::Renderer >();
+		if( !fresh->Build( *doc.sed, log ) )
+		{
+			fresh->Release();
+			return false;
+		}
+		if( sedRenderer )
+			sedRenderer->Release();
+		sedRenderer = std::move( fresh );
+		DestroyPasses( passes, ownedTextures );
+		DestroyBuffers();
+		userUniforms.clear();
+		return true;
+	}
+	if( !BuildShadertoy( doc, log ) )
+		return false;
+	if( sedRenderer )
+	{
+		sedRenderer->Release();
+		sedRenderer.reset();
+	}
+	return true;
+}
+
+bool Renderer::BuildShadertoy( ShaderDoc& doc, std::string& log )
 {
 	if( BuildOnce( doc, log ) )
 		return true;
@@ -577,8 +625,102 @@ void Renderer::PrepareInput( const FrameInputs& in )
 	glBindTexture( GL_TEXTURE_2D, 0 );
 }
 
+void Renderer::RenderShadered( const FrameInputs& in )
+{
+	PrepareInput( in );
+	sed::Frame f;
+	f.width     = in.width;
+	f.height    = in.height;
+	f.time      = in.time;
+	f.timeDelta = in.timeDelta;
+	f.frame     = in.frame;
+	memcpy( f.mouse, in.mouse, sizeof( f.mouse ) );
+	f.user      = in.user;
+	f.userCount = kMaxUserParams;
+	f.inputTex  = ( in.inputTex && copyTex ) ? copyTex : 0;
+	f.inputW    = copyW;
+	f.inputH    = copyH;
+	for( int i = 0; i < 4; ++i )
+	{
+		// mêmes modes que les iChannel : 0 projet, 1 entrée, 2 image, 3 audio, 4 noir
+		f.texMode[ i ]  = in.chMode[ i ];
+		f.texImage[ i ] = chImageTex[ i ];
+	}
+	f.audioTex = audioTex;
+	sedRenderer->Render( f );
+
+	// composition vers Resolume (alpha, Auto Mask)
+	if( !compositeProgram )
+	{
+		static const char* fs = R"(#version 410 core
+uniform sampler2D uTex;
+uniform vec2 uSize;
+uniform vec2 uOffset;
+uniform int  uForceAlpha;
+uniform vec4 uMask; // mode, seuil, douceur, inversion
+out vec4 o;
+void main()
+{
+	vec4 c = texture( uTex, ( gl_FragCoord.xy - uOffset ) / uSize );
+	vec4 r = ( uForceAlpha != 0 ) ? vec4( c.rgb, 1.0 ) : c;
+	if( uMask.x > 0.5 )
+	{
+		vec3 rgb = clamp( c.rgb, 0.0, 1.0 );
+		float l = dot( rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+		if( uMask.x > 1.5 && uMask.x < 2.5 ) l = max( rgb.r, max( rgb.g, rgb.b ) );
+		if( uMask.w > 0.5 ) l = 1.0 - l;
+		float m = smoothstep( uMask.y, uMask.y + max( uMask.z, 0.0001 ), l );
+		if( uMask.x > 2.5 ) m *= clamp( c.a, 0.0, 1.0 );
+		r.a = m;
+	}
+	o = r;
+}
+)";
+		std::string clog;
+		GLuint f2 = Compile( GL_FRAGMENT_SHADER, fs, clog );
+		if( f2 )
+		{
+			compositeProgram = glCreateProgram();
+			glAttachShader( compositeProgram, vertexShader );
+			glAttachShader( compositeProgram, f2 );
+			glLinkProgram( compositeProgram );
+			glDetachShader( compositeProgram, vertexShader );
+			glDetachShader( compositeProgram, f2 );
+			glDeleteShader( f2 );
+			uCompTex        = glGetUniformLocation( compositeProgram, "uTex" );
+			uCompSize       = glGetUniformLocation( compositeProgram, "uSize" );
+			uCompOffset     = glGetUniformLocation( compositeProgram, "uOffset" );
+			uCompForceAlpha = glGetUniformLocation( compositeProgram, "uForceAlpha" );
+			uCompMask       = glGetUniformLocation( compositeProgram, "uMask" );
+		}
+	}
+	glBindFramebuffer( GL_FRAMEBUFFER, in.hostFbo );
+	glViewport( in.vpX, in.vpY, in.width, in.height );
+	if( !compositeProgram )
+		return;
+	glUseProgram( compositeProgram );
+	glActiveTexture( GL_TEXTURE0 );
+	glBindTexture( GL_TEXTURE_2D, sedRenderer->OutputTexture() );
+	glBindSampler( 0, linearSampler );
+	glUniform1i( uCompTex, 0 );
+	glUniform2f( uCompSize, (float)in.width, (float)in.height );
+	glUniform2f( uCompOffset, (float)in.vpX, (float)in.vpY );
+	// alpha du projet seulement si le projet l'utilise (réglage SHADERed) ou si Shader Alpha est actif
+	glUniform1i( uCompForceAlpha, ( in.shaderAlpha || sedRenderer->UsesAlpha() ) ? 0 : 1 );
+	glUniform4f( uCompMask, (float)in.maskMode, in.maskThreshold, in.maskSoftness, in.maskInvert ? 1.0f : 0.0f );
+	quad.Draw();
+	glBindSampler( 0, 0 );
+	glBindTexture( GL_TEXTURE_2D, 0 );
+	glUseProgram( 0 );
+}
+
 void Renderer::Render( const FrameInputs& in )
 {
+	if( sedRenderer && sedRenderer->Ready() )
+	{
+		RenderShadered( in );
+		return;
+	}
 	if( passes.empty() )
 		return;
 

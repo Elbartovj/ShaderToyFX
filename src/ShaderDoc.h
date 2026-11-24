@@ -96,6 +96,11 @@ inline float UserParamValue( const UserParam& p, float n )
 }
 static const float kUserParamDefaultNorm = 0.5f;
 
+namespace sed
+{
+struct Project;
+}
+
 struct ShaderDoc
 {
 	std::string id;// id Shadertoy (6 caractères) si connu
@@ -108,6 +113,10 @@ struct ShaderDoc
 	std::vector< UserParam > params;
 	std::vector< std::string > warnings;
 	std::string rawJson;// JSON Shadertoy normalisé (vide pour un .glsl)
+	// projet SHADERed (.sprj) ou shader Godot : rendu par sed::Renderer au lieu des passes Shadertoy
+	std::shared_ptr< sed::Project > sed;
+	std::string languages;// langages du projet (« HLSL, GLSL »…), pour l'affichage
+	bool IsShadered() const { return sed != nullptr; }
 
 	const PassDesc* ImagePass() const;
 	int BufferCount() const;
@@ -122,8 +131,12 @@ void ResolveMedia( ShaderDoc& doc, bool allowDownload );
 // Charge une image (png, jpg, bmp, tga, gif, hdr…) en RGBA8, retournée verticalement si vflip
 std::shared_ptr< ImageData > LoadImageFile( const std::string& path, bool vflip, std::string& err );
 
-// Lecture + analyse + médias
+// Lecture + analyse + médias (Shadertoy .json/.glsl, projet SHADERed .sprj, shader Godot .gdshader)
 bool LoadShaderFile( const std::string& path, ShaderDoc& doc, std::string& err );
+bool IsShaderedPath( const std::string& path );
+
+// Plage automatique d'un slider autour de la valeur v (milieu = v)
+void GuessRange( UserParam& p, float v );
 
 // Détecte les paramètres réglables (uniforms, #define et const numériques) -> doc.params
 void ExtractUserParams( ShaderDoc& doc );

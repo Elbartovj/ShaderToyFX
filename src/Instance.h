@@ -43,6 +43,10 @@ struct InstanceSnapshot
 // Requêtes asynchrones (téléchargement/lecture sur un thread de travail)
 void RequestLoadFile( const SharedPtr& s, const std::string& path, bool userInitiated );
 void RequestLoadShadertoy( const SharedPtr& s, const std::string& id );
+// Projet shadered.org (id ou lien) : téléchargé dans Documents\ShaderToyFX\SHADERed puis chargé
+void RequestLoadShadered( const SharedPtr& s, const std::string& id );
+// Projet .sprj / .zip / shader Godot ouvert depuis le disque : copié dans la bibliothèque puis chargé
+void RequestImportShadered( const SharedPtr& s, const std::string& path );
 // source : voir PickRandomShader ("" = bibliothèque, dossier relatif, ou kRandomOnline)
 void RequestRandom( const SharedPtr& s, const std::string& source );
 void RequestApplyDoc( const SharedPtr& s, ShaderDoc doc, bool userInitiated );

@@ -33,15 +33,66 @@ add_library(imgui STATIC
 target_include_directories(imgui PUBLIC ${TP}/imgui)
 target_link_libraries(imgui PUBLIC d3d11 dxgi d3dcompiler dwmapi imm32 gdi32 user32)
 
+# ---- Projets SHADERed : glslang (GLSL/HLSL -> SPIR-V), SPIRV-Cross (SPIR-V -> GLSL), pugixml, miniz, glm
+# Téléchargés à la configuration (FetchContent). Pour une compilation hors ligne, pointer
+# FETCHCONTENT_SOURCE_DIR_<NOM> vers des copies locales.
+include(FetchContent)
+set(FETCHCONTENT_QUIET ON)
+FetchContent_Declare(glslang GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git GIT_TAG 16.6.0 GIT_SHALLOW ON)
+FetchContent_Declare(spirv_cross GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Cross.git GIT_TAG vulkan-sdk-1.4.363.0 GIT_SHALLOW ON)
+FetchContent_Declare(pugixml GIT_REPOSITORY https://github.com/zeux/pugixml.git GIT_TAG v1.9 GIT_SHALLOW ON)
+FetchContent_Declare(miniz GIT_REPOSITORY https://github.com/richgel999/miniz.git GIT_TAG 3.1.0 GIT_SHALLOW ON)
+FetchContent_Declare(glm GIT_REPOSITORY https://github.com/g-truc/glm.git GIT_TAG 1.0.2 GIT_SHALLOW ON)
+
+set(ENABLE_OPT OFF CACHE BOOL "" FORCE)
+set(GLSLANG_TESTS OFF CACHE BOOL "" FORCE)
+set(GLSLANG_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(ENABLE_GLSLANG_BINARIES OFF CACHE BOOL "" FORCE)
+set(ENABLE_SPVREMAPPER OFF CACHE BOOL "" FORCE)
+set(ENABLE_HLSL ON CACHE BOOL "" FORCE)
+set(BUILD_EXTERNAL OFF CACHE BOOL "" FORCE)
+set(ENABLE_PCH OFF CACHE BOOL "" FORCE)
+foreach(o CLI ENABLE_TESTS ENABLE_HLSL ENABLE_MSL ENABLE_CPP ENABLE_REFLECT ENABLE_C_API)
+    set(SPIRV_CROSS_${o} OFF CACHE BOOL "" FORCE)
+endforeach()
+set(SPIRV_CROSS_SKIP_INSTALL ON CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_UTIL ON CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_GLSL ON CACHE BOOL "" FORCE)
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_FUZZERS OFF CACHE BOOL "" FORCE)
+set(INSTALL_PROJECT OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(glslang spirv_cross pugixml miniz)
+FetchContent_GetProperties(glm)
+if(NOT glm_POPULATED)
+    FetchContent_Populate(glm)
+endif()
+
+add_library(godot_shader STATIC
+    ${TP}/godot_shader/ShaderTranscompiler.cpp ${TP}/godot_shader/Godot/misc.cpp
+    ${TP}/godot_shader/Godot/shader_compiler_gles3.cpp ${TP}/godot_shader/Godot/shader_language.cpp
+    ${TP}/godot_shader/Godot/shader_types.cpp)
+target_include_directories(godot_shader PUBLIC ${TP}/godot_shader)
+if(MSVC)
+    target_compile_options(godot_shader PRIVATE /w)
+else()
+    target_compile_options(godot_shader PRIVATE -w)
+endif()
+
 # ---- code commun
 set(STFX_SOURCES
     src/Util.cpp src/License.cpp src/Net.cpp src/ShaderDoc.cpp src/Params.cpp src/ShadertoyApi.cpp src/GlslGen.cpp
-    src/Renderer.cpp src/Instance.cpp src/Panel.cpp src/Preview.cpp src/Plugin.cpp src/StbImpl.cpp)
+    src/Renderer.cpp src/Instance.cpp src/Panel.cpp src/Preview.cpp src/Plugin.cpp src/StbImpl.cpp
+    src/sed/SedProject.cpp src/sed/SedCompiler.cpp src/sed/SedGeometry.cpp src/sed/SedRenderer.cpp src/sed/SedGodot.cpp
+    src/sed/SedArchive.cpp)
 
 function(stfx_plugin target outname)
     add_library(${target} SHARED ${STFX_SOURCES} src/ShaderToyFX.def)
-    target_include_directories(${target} PRIVATE src ${TP}/nlohmann/.. ${TP}/stb ${TP})
-    target_link_libraries(${target} PRIVATE ffgl imgui winhttp comdlg32 shell32 ole32 uuid)
+    target_include_directories(${target} PRIVATE src ${TP}/nlohmann/.. ${TP}/stb ${TP} ${glm_SOURCE_DIR})
+    target_compile_definitions(${target} PRIVATE GLM_ENABLE_EXPERIMENTAL)
+    target_link_libraries(${target} PRIVATE ffgl imgui winhttp comdlg32 shell32 ole32 uuid
+        glslang glslang-default-resource-limits SPIRV spirv-cross-glsl spirv-cross-util pugixml miniz godot_shader)
     set_target_properties(${target} PROPERTIES OUTPUT_NAME ${outname} PREFIX "")
     if(MINGW)
         target_link_options(${target} PRIVATE -static -static-libgcc -static-libstdc++ -s)

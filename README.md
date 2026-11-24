@@ -5,7 +5,7 @@
 
 **Télécharger :** la dernière version (DLL prêtes à l'emploi) se trouve dans l'onglet [Releases](../../releases).
 
-ShaderToyFX est un plugin FFGL 2 pour Resolume Arena/Avenue 7.4+ (Windows 64 bits). Il exécute directement des shaders Shadertoy, y compris les shaders multi-passes (Buffer A à D, Common), sans conversion vers ISF.
+ShaderToyFX est un plugin FFGL 2 pour Resolume Arena/Avenue 7.4+ (Windows 64 bits). Il exécute directement des shaders Shadertoy, y compris les shaders multi-passes (Buffer A à D, Common), sans conversion vers ISF. Il lit aussi les **projets [SHADERed](https://shadered.org)** (GLSL, GLSL ES, HLSL, GLSL Vulkan, Godot) et les **shaders Godot** `canvas_item`.
 
 Deux DLL sont produites :
 
@@ -81,6 +81,7 @@ Documents\ShaderToyFX\
   media\       <- textures, cubemaps, volumes et miniatures en cache
 %APPDATA%\ShaderToyFX\settings.json   <- clé API et préférences
 %APPDATA%\ShaderToyFX\favorites.json  <- shaders favoris
+Documents\ShaderToyFX\SHADERed\     <- projets SHADERed (un dossier par projet) et shaders Godot
 ```
 
 Un shader téléchargé est enregistré en `.json` et c'est ce fichier qui est stocké dans la composition. Le set fonctionne donc ensuite sans connexion.
@@ -98,6 +99,28 @@ Un shader téléchargé est enregistré en `.json` et c'est ce fichier qui est s
 | Passe *Sound*, passe *Cube A* | Non supportées : le shader est ignoré ou noir, avec un avertissement |
 
 Uniforms disponibles : `iResolution`, `iTime`, `iTimeDelta`, `iFrameRate`, `iFrame`, `iChannelTime[4]`, `iChannelResolution[4]`, `iMouse`, `iDate`, `iSampleRate`, `iChannel0..3`.
+
+## Projets SHADERed et shaders Godot
+
+ShaderToyFX exécute les projets [SHADERed](https://shadered.org) avec le même moteur que SHADERed : passes de rendu et compute, géométries (cube, sphère, plan, quad plein écran…), modèles `.obj`, render textures, états de rendu (fusion, profondeur, stencil, fil de fer), instanciation, buffers, cubemaps, tessellation et geometry shaders, variables système (`Time`, `ViewportSize`, `MousePosition`, matrices de caméra…) et fonctions.
+
+- **Charger** : colle un lien `https://shadered.org/view?s=…` dans l'onglet LIEN. Ou bien ouvre un `.sprj` ou l'archive `.zip` téléchargée sur shadered.org dans l'onglet FICHIER. Le projet est copié, avec ses textures, dans `Documents\ShaderToyFX\SHADERed\` et apparaît dans la BIBLIOTHÈQUE (aperçu, favoris, dossiers, aléatoire).
+- **Langages** :
+
+  | Langage | Prise en charge |
+  |---|---|
+  | GLSL | Oui, tel quel |
+  | GLSL ES (version web de SHADERed) | Oui, version desktop équivalente |
+  | HLSL | Oui, via glslang et SPIRV-Cross, comme SHADERed |
+  | GLSL Vulkan (`.vk`) | Oui, via glslang et SPIRV-Cross, comme SHADERed |
+  | Godot (`canvas_item`) | Oui, Godot 3 et syntaxes Godot 4 courantes : `source_color`, `hint_screen_texture`… |
+  | Rust (rust-gpu) | Non : demande un compilateur externe. Exporte le projet en GLSL ou HLSL depuis SHADERed. |
+  | C++ (Circle) | Non : le compilateur n'existe que sous Linux. Exporte le projet en GLSL ou HLSL depuis SHADERed. |
+- **Sliders** : chaque variable du projet sans valeur système devient un slider Resolume (`float`, `int`, `bool`, vecteurs composante par composante). Le milieu du slider donne la valeur du projet. Pour les shaders Godot, les `uniform` deviennent des sliders, avec la plage `hint_range` si elle existe et une plage 0..1 pour les couleurs.
+- **Entrée Resolume** : les paramètres *Texture 0..3* de l'effet (même menu que les iChannel) remplacent les 4 premières textures du projet par l'entrée Resolume, une image, l'audio ou du noir. Dans un shader Godot, `TEXTURE` est l'entrée Resolume, à l'endroit, comme dans Godot. `SCREEN_TEXTURE` contient ce qui est déjà dessiné.
+- La souris (`MousePosition`) suit les paramètres Mouse de l'effet. Le clavier n'est pas transmis.
+- Non pris en charge : passes audio, greffons SHADERed autres que GodotShaders, textures 3D depuis un fichier, modèles autres que `.obj`. Un avertissement s'affiche en bas de la fenêtre.
+- **Fichier Godot seul** (`.gdshader`, ou `.shader` contenant `shader_type`) : il devient un effet plein écran, avec `TEXTURE` égale à l'entrée Resolume.
 
 ## Écrire ses propres shaders (`.glsl`)
 
@@ -165,6 +188,7 @@ cmake -B build -DCMAKE_TOOLCHAIN_FILE=mingw.cmake -DCMAKE_BUILD_TYPE=Release && 
 | `src/ShadertoyApi.*` | API REST Shadertoy (shader, recherche, liste complète), cache disque |
 | `src/Net.*` | HTTPS via WinHTTP |
 | `src/Instance.*` | État partagé et thread-safe de chaque instance, chargements asynchrones, registre des instances |
+| `src/sed/*` | Projets SHADERed : lecture des `.sprj` (`SedProject`), traduction GLSL/HLSL/Vulkan/GLSL ES (`SedCompiler`, glslang + SPIRV-Cross), géométries (`SedGeometry`), exécution du pipeline (`SedRenderer`), shaders Godot (`SedGodot`), import zip / shadered.org (`SedArchive`) |
 | `src/Preview.*` | Aperçu animé de la bibliothèque : contexte WGL caché sur un thread dédié, rendu basse résolution relu vers le panneau |
 | `src/Panel.*` | Fenêtre *Shader Library* : thread dédié, Win32, Direct3D 11 et Dear ImGui, sans toucher au contexte GL de Resolume |
 

@@ -1,6 +1,9 @@
 #include "ShaderDoc.h"
 #include "Util.h"
 #include "Net.h"
+#include "sed/SedProject.h"
+#include "sed/SedGodot.h"
+#include "sed/SedCompiler.h"
 #include <nlohmann/json.hpp>
 #include <stb_image.h>
 #include <regex>
@@ -508,6 +511,175 @@ void ResolveMedia( ShaderDoc& doc, bool allowDownload )
 	}
 }
 
+// Variables SHADERed sans valeur système / fonction + uniforms Godot -> sliders Resolume
+static void ExtractShaderedParams( ShaderDoc& doc )
+{
+	doc.params.clear();
+	auto& proj = *doc.sed;
+	auto add   = [ & ]( const std::string& name, int comps, bool isInt, bool isBool, bool isColor, const float* defs, bool hasRange,
+					float rmin, float rmax ) -> int {
+		if( (int)doc.params.size() + comps > kMaxUserParams )
+			return -1;
+		int first             = (int)doc.params.size();
+		static const char* xyzw[] = { ".x", ".y", ".z", ".w" };
+		static const char* rgba[] = { ".r", ".g", ".b", ".a" };
+		for( int c = 0; c < comps; ++c )
+		{
+			UserParam p;
+			p.name    = comps > 1 ? name + ( isColor ? rgba[ c ] : xyzw[ c ] ) : name;
+			p.uniform = name;
+			p.source  = ParamSource::Uniform;
+			p.comp    = comps > 1 ? c : -1;
+			p.vecSize = comps;
+			p.isInt   = isInt;
+			float v   = defs[ c ];
+			if( isBool )
+			{
+				p.minV = 0;
+				p.maxV = 1;
+				p.def  = v;
+			}
+			else if( hasRange && rmax > rmin )
+			{
+				p.minV = rmin;
+				p.maxV = rmax;
+				p.def  = std::clamp( v, rmin, rmax );
+			}
+			else if( isColor )
+			{
+				p.minV = 0;
+				p.maxV = 1;
+				p.def  = std::clamp( v, 0.0f, 1.0f );
+			}
+			else
+				GuessRange( p, v );
+			doc.params.push_back( p );
+		}
+		return first;
+	};
+	for( auto& pass : proj.passes )
+	{
+		if( pass.kind == sed::PassKind::Godot && !pass.godotPath.empty() )
+		{
+			std::string src, err;
+			sed::GodotShader gd;
+			if( ReadFileText( pass.godotPath, src ) && sed::TranscompileGodot( src, gd, err ) )
+				for( auto& u : gd.uniforms )
+				{
+					if( u.isSampler || u.components > 4 )
+						continue;
+					sed::Pass::GodotUniform* pu = nullptr;
+					for( auto& g : pass.godotUniforms )
+						if( g.name == u.name )
+							pu = &g;
+					if( !pu )
+					{
+						pass.godotUniforms.push_back( {} );
+						pu        = &pass.godotUniforms.back();
+						pu->name  = u.name;
+						pu->value = u.defaults;
+					}
+					std::vector< float > defs = pu->value;
+					defs.resize( 4, 0.0f );
+					pu->userParam = add( u.name, u.components, u.isInt, u.isBool, u.isColor, defs.data(), u.hasRange, u.rangeMin, u.rangeMax );
+				}
+			continue;
+		}
+		for( auto& v : pass.variables )
+		{
+			if( v.system != sed::SystemVar::None || v.func != sed::FunctionVar::None )
+				continue;
+			int n = sed::ValueCount( v.type );
+			if( n > 4 || v.type == sed::ValueType::Float2x2 )
+				continue;
+			// une même variable dans plusieurs passes partage son slider
+			int shared = -1;
+			for( size_t i = 0; i < doc.params.size(); ++i )
+				if( doc.params[ i ].uniform == v.name && doc.params[ i ].comp <= 0 )
+					shared = (int)i;
+			if( shared >= 0 )
+			{
+				v.userParam = shared;
+				continue;
+			}
+			bool isBool = v.type <= sed::ValueType::Bool4;
+			bool isInt  = isBool || v.type <= sed::ValueType::Int4;
+			std::string lower = ToLower( v.name );
+			bool isColor = !isInt && ( n == 3 || n == 4 ) && ( lower.find( "col" ) != std::string::npos || lower.find( "tint" ) != std::string::npos );
+			v.userParam = add( v.name, n, isInt, isBool, isColor, v.value, false, 0, 0 );
+		}
+	}
+}
+
+static bool LoadShaderedFile( const std::string& realPath, ShaderDoc& doc, std::string& err )
+{
+	auto proj = std::make_shared< sed::Project >();
+	std::string ext = FileExtLower( realPath );
+	if( ext == ".sprj" )
+	{
+		if( !sed::LoadProject( realPath, *proj, err ) )
+			return false;
+	}
+	else if( !sed::MakeGodotProject( realPath, *proj, err ) )
+		return false;
+	doc            = ShaderDoc();
+	doc.sed        = proj;
+	doc.sourcePath = realPath;
+	doc.title      = FileStem( realPath );
+	if( ext == ".sprj" )
+	{
+		std::string folder = ParentDir( realPath );
+		size_t slash       = folder.find_last_of( "/\\" );
+		doc.title          = slash == std::string::npos ? folder : folder.substr( slash + 1 );
+		if( FileStem( realPath ) != "project" && FileStem( realPath ) != "proj" )
+			doc.title = FileStem( realPath );
+	}
+	// langages utilisés
+	std::vector< std::string > langs;
+	auto addLang = [ & ]( const std::string& path ) {
+		if( path.empty() )
+			return;
+		std::string src;
+		ReadFileText( path, src );
+		std::string l = sed::LangName( sed::LangFromPath( path, src ) );
+		if( std::find( langs.begin(), langs.end(), l ) == langs.end() )
+			langs.push_back( l );
+	};
+	for( auto& p : proj->passes )
+	{
+		if( p.kind == sed::PassKind::Godot )
+		{
+			if( std::find( langs.begin(), langs.end(), "Godot" ) == langs.end() )
+				langs.push_back( "Godot" );
+			continue;
+		}
+		addLang( p.vsPath );
+		addLang( p.psPath );
+		addLang( p.csPath );
+	}
+	for( auto& l : langs )
+		doc.languages += ( doc.languages.empty() ? "" : ", " ) + l;
+	doc.warnings = proj->warnings;
+	for( auto& pl : proj->plugins )
+		if( pl != "GodotShaders" )
+			doc.warnings.push_back( "Greffon SHADERed « " + pl + " » non disponible : certaines passes sont ignorées." );
+	ExtractShaderedParams( doc );
+	return true;
+}
+
+bool IsShaderedPath( const std::string& path )
+{
+	std::string ext = FileExtLower( path );
+	if( ext == ".sprj" || ext == ".gdshader" )
+		return true;
+	if( ext == ".shader" )
+	{
+		std::string t;
+		return ReadFileText( path, t ) && t.find( "shader_type" ) != std::string::npos;
+	}
+	return false;
+}
+
 bool LoadShaderFile( const std::string& path, ShaderDoc& doc, std::string& err )
 {
 	std::string text;
@@ -519,6 +691,8 @@ bool LoadShaderFile( const std::string& path, ShaderDoc& doc, std::string& err )
 		if( !moved.empty() )
 			realPath = moved;
 	}
+	if( IsShaderedPath( realPath ) )
+		return LoadShaderedFile( realPath, doc, err );
 	if( !ReadFileText( realPath, text ) )
 	{
 		err = "Impossible de lire " + path;

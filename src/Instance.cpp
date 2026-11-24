@@ -1,4 +1,5 @@
 #include "Instance.h"
+#include "sed/SedArchive.h"
 #include "ShadertoyApi.h"
 #include "Util.h"
 #include <thread>
@@ -94,6 +95,28 @@ void RequestLoadShadertoy( const SharedPtr& s, const std::string& id )
 		if( !FetchShaderToCache( id, path, title, err ) )
 			return false;
 		return LoadShaderFile( path, doc, err );
+	} );
+}
+
+void RequestLoadShadered( const SharedPtr& s, const std::string& id )
+{
+	RunAsync( s, "Téléchargement SHADERed " + id + "…", [ id ]( ShaderDoc& doc, std::string& err, bool& user ) {
+		user = true;
+		std::string sprj;
+		if( !sed::DownloadShaderedProject( id, sprj, err ) )
+			return false;
+		return LoadShaderFile( sprj, doc, err );
+	} );
+}
+
+void RequestImportShadered( const SharedPtr& s, const std::string& path )
+{
+	RunAsync( s, "Import de " + FileStem( path ) + "…", [ path ]( ShaderDoc& doc, std::string& err, bool& user ) {
+		user = true;
+		std::string imported;
+		if( !sed::ImportIntoLibrary( path, imported, err ) )
+			return false;
+		return LoadShaderFile( imported, doc, err );
 	} );
 }
 

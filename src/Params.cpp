@@ -127,7 +127,7 @@ bool IsBlacklisted( const std::string& name )
 }
 
 // plage par défaut à partir de la valeur
-void GuessRange( UserParam& p, float v )
+void GuessRangeImpl( UserParam& p, float v )
 {
 	// plage symétrique : le milieu du slider (valeur par défaut dans Resolume) = valeur du shader
 	p.def = v;
@@ -606,8 +606,15 @@ bool UsedInConstContext( const std::string& name, const std::vector< std::string
 }
 }//namespace
 
+void GuessRange( UserParam& p, float v )
+{
+	GuessRangeImpl( p, v );
+}
+
 void ExtractUserParams( ShaderDoc& doc )
 {
+	if( doc.IsShadered() )
+		return;// paramètres déjà extraits des variables du projet SHADERed / uniforms Godot
 	doc.params.clear();
 	std::vector< std::string > sources;
 	sources.push_back( doc.common );
@@ -750,7 +757,7 @@ void ExtractUserParams( ShaderDoc& doc )
 				p.maxV = p.def + 0.5f;
 			}
 			else
-				GuessRange( p, c.values[ k ] );
+				GuessRangeImpl( p, c.values[ k ] );
 			if( c.vecSize == 1 )
 				ApplyComment( p, c.comment );
 			doc.params.push_back( p );

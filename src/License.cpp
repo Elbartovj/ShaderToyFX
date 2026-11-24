@@ -125,7 +125,28 @@ LicenseInfo LicenseForFile( const std::string& path )
 	}
 	std::string text;
 	LicenseInfo info;
-	if( ReadFileText( path, text ) )
+	if( FileExtLower( path ) == ".sprj" )
+	{
+		// projet SHADERed : la licence est dans les commentaires des fichiers de shaders
+		std::string all;
+		std::error_code ec2;
+		for( auto& f : std::filesystem::recursive_directory_iterator( std::filesystem::path( Widen( ParentDir( path ) ) ), ec2 ) )
+		{
+			if( !f.is_regular_file( ec2 ) )
+				continue;
+			std::string ext = ToLower( Narrow( f.path().extension().wstring() ) );
+			if( ext != ".glsl" && ext != ".hlsl" && ext != ".vk" && ext != ".frag" && ext != ".vert" && ext != ".shader" &&
+				ext != ".gdshader" && ext != ".txt" && ext != ".md" && ext != ".rs" && ext != ".cpp" )
+				continue;
+			std::string t;
+			if( ReadFileText( Narrow( f.path().wstring() ), t ) )
+				all += t.substr( 0, 32768 ) + "\n";
+			if( all.size() > 262144 )
+				break;
+		}
+		info = DetectLicense( all, false );
+	}
+	else if( ReadFileText( path, text ) )
 	{
 		size_t first = text.find_first_not_of( " \t\r\n" );
 		if( first != std::string::npos && ( text[ first ] == '{' || text[ first ] == '[' ) )

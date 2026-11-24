@@ -41,6 +41,10 @@ struct LocalEntry
 	int64_t modified = 0;
 };
 std::vector< LocalEntry > ListShaderFiles( const std::string& dir );
+// Projets SHADERed : le .sprj représente tout son dossier (déplacer / supprimer)
+bool IsShaderedProjectFile( const std::string& path );
+bool IsLibraryShaderExt( const std::string& extLowerWithDot );
+std::string ShaderedDir();// Documents\ShaderToyFX\SHADERed
 
 // Dossiers de rangement (relatifs à RootDir, hors "media"), triés
 std::vector< std::string > ListFolders();

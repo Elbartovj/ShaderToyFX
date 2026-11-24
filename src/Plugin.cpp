@@ -1,4 +1,5 @@
 #include "Plugin.h"
+#include "sed/SedProject.h"
 #include "Panel.h"
 #include "Util.h"
 #include "ShadertoyApi.h"
@@ -172,12 +173,24 @@ void ShaderToyFX::UpdateChannelParams( bool raiseEvents )
 		std::lock_guard< std::mutex > lock( shared->m );
 		doc = shared->current;
 	}
+	// projet SHADERed : les 4 premières textures images du projet sont remplaçables
+	std::vector< std::string > sedTextures;
+	if( doc && doc->IsShadered() )
+		for( auto& o : doc->sed->objects )
+			if( o.kind == sed::ObjectKind::Texture && sedTextures.size() < 4 )
+				sedTextures.push_back( FileStem( o.name ) );
 	for( int ch = 0; ch < 4; ++ch )
 	{
 		std::string tag = "iChannel" + std::to_string( ch );
 		bool used       = false;
 		std::string what;
-		if( doc )
+		if( doc && doc->IsShadered() )
+		{
+			used = ch < (int)sedTextures.size();
+			tag  = "Texture " + std::to_string( ch );
+			what = used ? sedTextures[ ch ] : std::string();
+		}
+		else if( doc )
 		{
 			for( auto& p : doc->passes )
 			{

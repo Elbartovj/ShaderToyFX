@@ -5,6 +5,7 @@
 #include "Net.h"
 #include "License.h"
 #include "Preview.h"
+#include "sed/SedArchive.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -429,7 +430,8 @@ std::string BrowseForFile( HWND owner )
 	OPENFILENAMEW ofn{};
 	ofn.lStructSize = sizeof( ofn );
 	ofn.hwndOwner   = owner;
-	ofn.lpstrFilter = L"Shaders (*.json;*.glsl;*.frag;*.txt)\0*.json;*.glsl;*.frag;*.txt\0Tous les fichiers\0*.*\0";
+	ofn.lpstrFilter = L"Shaders (*.json;*.glsl;*.frag;*.txt;*.sprj;*.zip;*.gdshader;*.shader)\0*.json;*.glsl;*.frag;*.txt;*.sprj;*.zip;*.gdshader;*.shader\0"
+					  L"Projets SHADERed (*.sprj;*.zip)\0*.sprj;*.zip\0Shaders Godot (*.gdshader;*.shader)\0*.gdshader;*.shader\0Tous les fichiers\0*.*\0";
 	ofn.lpstrFile   = file;
 	ofn.nMaxFile    = 1024;
 	std::wstring init = Widen( RootDir() );
@@ -699,7 +701,8 @@ void TabShadertoy( HWND )
 //------------------------------------------------------------------ onglet LIEN
 void TabLink()
 {
-	ImGui::TextWrapped( "Colle un lien Shadertoy (https://www.shadertoy.com/view/XXXXXX) ou un id à 6 caractères." );
+	ImGui::TextWrapped( "Colle un lien Shadertoy (https://www.shadertoy.com/view/XXXXXX), un id à 6 caractères, "
+						"ou un lien SHADERed (https://shadered.org/view?s=XXXXXXXXXX)." );
 	ImGui::Spacing();
 	ImGui::SetNextItemWidth( -ImGui::GetFontSize() * 12 );
 	bool enter = ImGui::InputTextWithHint( "##link", "https://www.shadertoy.com/view/…", &g_ui->link, ImGuiInputTextFlags_EnterReturnsTrue );
@@ -708,6 +711,23 @@ void TabLink()
 		if( const char* clip = ImGui::GetClipboardText() )
 			g_ui->link = clip;
 	ImGui::SameLine();
+	// lien SHADERed : projet complet (GLSL, GLSL ES, HLSL, Vulkan, Godot) téléchargé depuis shadered.org
+	std::string sedId = sed::ParseShaderedId( g_ui->link );
+	if( !sedId.empty() )
+	{
+		if( ImGui::Button( "Charger" ) || enter )
+			if( SharedPtr t = Target() )
+			{
+				RequestLoadShadered( t, sedId );
+				g_ui->localDirty = true;
+				Toast( "Téléchargement SHADERed " + sedId + "…" );
+			}
+		ImGui::TextDisabled( "Projet SHADERed : %s", sedId.c_str() );
+		ImGui::Spacing();
+		ImGui::TextWrapped( "Le projet est enregistré dans Documents\\ShaderToyFX\\SHADERed et apparaît dans la BIBLIOTHÈQUE. "
+							"Les shaders Rust et C++ demandent un compilateur externe : exporte-les en GLSL/HLSL depuis SHADERed." );
+		return;
+	}
 	std::string id     = ExtractShaderId( g_ui->link );
 	bool noKey         = Trim( g_ui->settings.apiKey ).empty();
 	std::string cached = id.empty() ? std::string() : FindCachedPath( id );
@@ -758,10 +778,24 @@ void TabFile( HWND hwnd )
 		if( !p.empty() )
 		{
 			g_ui->lastBrowsed = p;
-			LoadPath( p );
+			std::string ext   = FileExtLower( p );
+			// projets SHADERed / shaders Godot : copiés dans la bibliothèque (avec textures et modèles)
+			if( ext == ".sprj" || ext == ".zip" || IsShaderedPath( p ) )
+			{
+				if( SharedPtr t = Target() )
+				{
+					RequestImportShadered( t, p );
+					g_ui->localDirty = true;
+					Toast( "Import de " + FileStem( p ) + "…" );
+				}
+			}
+			else
+				LoadPath( p );
 		}
 	}
 	HelpMarker( "Formats : .json (export ou API Shadertoy, multi-passes) et .glsl/.frag/.txt (une seule passe avec mainImage).\n"
+				"SHADERed : projet .sprj (GLSL, GLSL ES, HLSL, GLSL Vulkan, Godot) ou archive .zip téléchargée sur shadered.org.\n"
+				"Godot : shader canvas_item .gdshader / .shader (TEXTURE = entrée Resolume, uniforms = sliders).\n"
 				"Dans un .glsl : iChannel0 = entrée Resolume, iChannel1 = audio. Annotations possibles :\n"
 				"  // @iChannel2 texture.png   // @iChannel0 audio\n"
 				"Paramètres : uniform float vitesse; // 0 5 1   (min max défaut) -> slider dans Resolume." );
@@ -1439,6 +1473,23 @@ void TabEditor( const InstanceSnapshot& snap )
 		return;
 	}
 	const ShaderDoc& base = *g_ui->editorBase;
+	if( base.IsShadered() )
+	{
+		// projet SHADERed / shader Godot : plusieurs fichiers, langages variés -> édition dans leur éditeur
+		ImGui::Text( "%s", base.title.c_str() );
+		ImGui::TextDisabled( "Projet %s  ·  %s", base.languages.c_str(), base.sourcePath.c_str() );
+		ImGui::Spacing();
+		ImGui::TextWrapped( "Ce shader vient de SHADERed ou de Godot : modifie ses fichiers dans SHADERed (ou un éditeur de texte), "
+							"puis recharge-le ici. Les variables du projet et les uniforms Godot sont des sliders dans Resolume." );
+		if( ImGui::Button( "Ouvrir le dossier" ) )
+			OpenInExplorer( ParentDir( base.sourcePath ) );
+		ImGui::SameLine();
+		if( ImGui::Button( "Recharger" ) )
+			LoadPath( base.sourcePath );
+		for( auto& w : base.warnings )
+			ImGui::TextColored( ImVec4( 1.0f, 0.75f, 0.3f, 1.0f ), "%s", w.c_str() );
+		return;
+	}
 	ImGui::Text( "%s", base.title.c_str() );
 	if( !base.sourcePath.empty() )
 	{
