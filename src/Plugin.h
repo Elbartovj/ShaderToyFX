@@ -34,7 +34,11 @@ enum ParamIndex : unsigned int
 	PT_INPUT_FIT,// cadrage de l'entrée Resolume : étirer / contenir / remplir / 1:1
 	PT_ASPECT_FIX,// pour les shaders qui étirent uv.x par le ratio de l'écran
 	PT_USER0,
-	PT_COUNT = PT_USER0 + stfx::kMaxUserParams
+	// ajoutés après les sliders pour ne pas décaler les paramètres des compositions existantes
+	PT_MODEL0 = PT_USER0 + stfx::kMaxUserParams,// modèles .obj d'un projet SHADERed, remplaçables
+	PT_MODEL1,
+	PT_MODEL_FIT,
+	PT_COUNT
 };
 
 class ShaderToyFX : public CFFGLPlugin
@@ -80,6 +84,7 @@ private:
 	};
 	std::shared_ptr< ImageSlots > imageSlots = std::make_shared< ImageSlots >();
 	std::string chImagePath[ 4 ];
+	std::string modelPath[ 2 ];
 	bool chUsed[ 4 ] = { true, true, true, true };
 	std::vector< std::string > randomSources;// "" = bibliothèque, kRandomOnline, dossiers
 	std::string randomFolder;                 // source choisie (persistée)

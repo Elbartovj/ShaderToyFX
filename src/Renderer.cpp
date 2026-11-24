@@ -647,6 +647,9 @@ void Renderer::RenderShadered( const FrameInputs& in )
 		f.texImage[ i ] = chImageTex[ i ];
 	}
 	f.audioTex = audioTex;
+	f.modelPath[ 0 ] = in.modelPath[ 0 ];
+	f.modelPath[ 1 ] = in.modelPath[ 1 ];
+	f.modelFit       = in.modelFit;
 	sedRenderer->Render( f );
 
 	// composition vers Resolume (alpha, Auto Mask)
@@ -770,9 +773,9 @@ void Renderer::Render( const FrameInputs& in )
 			GLenum target    = c.target;
 			float rw = 0, rh = 0, rd = 0;
 			GLuint sampler   = p.samplers[ i ];
-			// remplacement choisi dans Resolume : jamais sur un buffer (feedback) ni sur un sampler cube/3D
+			// remplacement choisi dans Resolume (y compris à la place d'un buffer) ; impossible sur un sampler cube/3D
 			int mode = in.chMode[ i ];
-			if( mode != CH_SHADER && c.kind != ChannelKind::Buffer && target == GL_TEXTURE_2D )
+			if( mode != CH_SHADER && target == GL_TEXTURE_2D )
 			{
 				switch( mode )
 				{

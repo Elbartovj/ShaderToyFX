@@ -31,6 +31,9 @@ struct Frame
 	int texMode[ 4 ] = {};// 0 = celle du projet, 1 = entrée Resolume, 2 = image choisie, 3 = audio, 4 = noir
 	GLuint texImage[ 4 ] = {};
 	GLuint audioTex = 0;// 512x2 (spectre / forme d'onde)
+	// remplacement des modèles .obj du projet (ordre d'apparition) ; vide = modèle d'origine
+	std::string modelPath[ 2 ];
+	bool modelFit = true;// recale le modèle choisi sur la taille et la position de l'original
 };
 
 class Renderer
@@ -40,6 +43,7 @@ public:
 	// Compile tout le projet. false = log contient les erreurs (l'ancien projet reste actif).
 	bool Build( const Project& project, std::string& log );
 	void Render( const Frame& f );
+	void UpdateModels( const Frame& f );
 	void Release();
 	void ResetTime();
 
@@ -50,6 +54,8 @@ public:
 	bool Ready() const { return proj != nullptr; }
 	// textures images du projet (pour les libellés du panneau)
 	const std::vector< std::string >& ReplaceableTextures() const { return replaceable; }
+	// modèles .obj distincts du projet, dans l'ordre (2 au plus sont remplaçables)
+	static std::vector< std::string > ModelFiles( const Project& p );
 
 private:
 	struct RT
@@ -80,6 +86,10 @@ private:
 		GLuint instanceBuffer = 0;
 		std::vector< int > instanceFormat;
 		GLuint spriteTex = 0;
+		int modelIndex   = -1;// 0..1 si remplaçable par un paramètre de l'effet
+		std::string modelKey;// fichier actuellement chargé (+ recalage)
+		float boxMin[ 3 ] = {}, boxMax[ 3 ] = {};
+		bool hasBox = false;
 	};
 	struct GpuVar
 	{

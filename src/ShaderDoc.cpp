@@ -258,7 +258,7 @@ static bool ParseJsonDoc( const std::string& text, ShaderDoc& doc, std::string& 
 				}
 				else if( ctype == "volume" )
 					c.kind = ChannelKind::Volume;
-				else if( ctype == "music" || ctype == "musicstream" || ctype == "mic" )
+				else if( ctype == "music" || ctype == "musicstream" || ctype == "mic" || ctype == "soundcloud" || ctype == "audio" )
 					c.kind = ChannelKind::Audio;
 				else if( ctype == "video" || ctype == "webcam" )
 					c.kind = ChannelKind::Input;

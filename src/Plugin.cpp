@@ -1,5 +1,6 @@
 #include "Plugin.h"
 #include "sed/SedProject.h"
+#include "sed/SedRenderer.h"
 #include "Panel.h"
 #include "Util.h"
 #include "ShadertoyApi.h"
@@ -112,6 +113,17 @@ ShaderToyFX::ShaderToyFX()
 		SetParamVisibility( PT_INPUT_FIT, false, false );
 	}
 
+	// projets SHADERed : remplacer les modèles .obj
+	SetFileParamInfo( PT_MODEL0, "Model 1", { "obj" }, "" );
+	SetFileParamInfo( PT_MODEL1, "Model 2", { "obj" }, "" );
+	SetParamInfo( PT_MODEL_FIT, "Model Fit", FF_TYPE_BOOLEAN, true );
+	values[ PT_MODEL_FIT ] = 1.0f;
+	for( unsigned int i = PT_MODEL0; i <= PT_MODEL_FIT; ++i )
+	{
+		SetParamGroup( i, "Models" );
+		SetParamVisibility( i, false, false );
+	}
+
 	for( unsigned int i = 0; i < (unsigned)kMaxUserParams; ++i )
 	{
 		unsigned int idx = PT_USER0 + i;
@@ -218,6 +230,18 @@ void ShaderToyFX::UpdateChannelParams( bool raiseEvents )
 		if( used )
 			SetParamDisplayName( ChSrc( ch ), tag + " (" + what + ")", raiseEvents );
 	}
+	// modèles .obj du projet SHADERed
+	std::vector< std::string > models;
+	if( doc && doc->IsShadered() )
+		models = sed::Renderer::ModelFiles( *doc->sed );
+	for( int k = 0; k < 2; ++k )
+	{
+		bool vis = k < (int)models.size();
+		SetParamVisibility( PT_MODEL0 + k, vis, raiseEvents );
+		if( vis )
+			SetParamDisplayName( PT_MODEL0 + k, "Model " + std::to_string( k + 1 ) + " (" + FileStem( models[ k ] ) + ")", raiseEvents );
+	}
+	SetParamVisibility( PT_MODEL_FIT, !models.empty(), raiseEvents );
 }
 
 std::string ShaderToyFX::RandomSource() const
@@ -325,6 +349,17 @@ void ShaderToyFX::ResetClock()
 void ShaderToyFX::ApplyUserParams( const std::vector< UserParam >& params, bool resetValues, bool keepHostValues )
 {
 	userParams = params;
+	// projets SHADERed : remplacer les modèles .obj
+	SetFileParamInfo( PT_MODEL0, "Model 1", { "obj" }, "" );
+	SetFileParamInfo( PT_MODEL1, "Model 2", { "obj" }, "" );
+	SetParamInfo( PT_MODEL_FIT, "Model Fit", FF_TYPE_BOOLEAN, true );
+	values[ PT_MODEL_FIT ] = 1.0f;
+	for( unsigned int i = PT_MODEL0; i <= PT_MODEL_FIT; ++i )
+	{
+		SetParamGroup( i, "Models" );
+		SetParamVisibility( i, false, false );
+	}
+
 	for( unsigned int i = 0; i < (unsigned)kMaxUserParams; ++i )
 	{
 		unsigned int idx = PT_USER0 + i;
@@ -528,6 +563,9 @@ FFResult ShaderToyFX::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 			in.user[ i ] = n;
 	}
 
+	in.modelPath[ 0 ] = modelPath[ 0 ];
+	in.modelPath[ 1 ] = modelPath[ 1 ];
+	in.modelFit       = values[ PT_MODEL_FIT ] > 0.5f;
 	renderer.Render( in );
 	++frame;
 	return FF_SUCCESS;
@@ -535,7 +573,7 @@ FFResult ShaderToyFX::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 
 FFResult ShaderToyFX::SetFloatParameter( unsigned int index, float value )
 {
-	if( index >= PT_COUNT || index == PT_SHADER || index == PT_FFT || index == PT_RANDOM_FOLDER )
+	if( index >= PT_COUNT || index == PT_SHADER || index == PT_FFT || index == PT_RANDOM_FOLDER || index == PT_MODEL0 || index == PT_MODEL1 )
 		return index == PT_FFT ? FF_SUCCESS : FF_FAIL;
 	if( index >= PT_CH_FIRST && index <= PT_CH_LAST )
 	{
@@ -560,7 +598,7 @@ FFResult ShaderToyFX::SetFloatParameter( unsigned int index, float value )
 		return FF_SUCCESS;
 	}
 	bool rising = value > 0.5f && values[ index ] <= 0.5f;
-	if( glReady && index >= PT_USER0 && index < PT_COUNT )
+	if( glReady && index >= PT_USER0 && index < PT_USER0 + kMaxUserParams )
 		userTouched[ index - PT_USER0 ] = true;// (avant InitGL = valeurs par défaut de FFGL : ignorées)
 	values[ index ] = value;
 	if( !rising )
@@ -600,6 +638,11 @@ FFResult ShaderToyFX::SetTextParameter( unsigned int index, const char* value )
 		}
 		return FF_SUCCESS;
 	}
+	if( index == PT_MODEL0 || index == PT_MODEL1 )
+	{
+		modelPath[ index - PT_MODEL0 ] = value ? value : "";
+		return FF_SUCCESS;
+	}
 	if( index == PT_RANDOM_FOLDER )
 	{
 		randomFolder = value ? value : "";
@@ -629,6 +672,8 @@ char* ShaderToyFX::GetTextParameter( unsigned int index )
 {
 	if( index >= PT_CH_FIRST && index <= PT_CH_LAST && ( index - PT_CH_FIRST ) % 2 == 1 )
 		return const_cast< char* >( chImagePath[ ( index - PT_CH_FIRST ) / 2 ].c_str() );
+	if( index == PT_MODEL0 || index == PT_MODEL1 )
+		return const_cast< char* >( modelPath[ index - PT_MODEL0 ].c_str() );
 	if( index == PT_RANDOM_FOLDER )
 		return const_cast< char* >( randomFolder.c_str() );
 	if( index != PT_SHADER )

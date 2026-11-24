@@ -189,7 +189,42 @@ bool LoadObj( const std::string& path, const std::string& group, bool groupOnly,
 			}
 		}
 	}
+	// pas de normales dans le fichier : normales plates par triangle
+	for( size_t t = 0; t + 54 <= out.size(); t += 54 )
+	{
+		float* a = &out[ t ];
+		if( a[ 3 ] != 0 || a[ 4 ] != 0 || a[ 5 ] != 0 || a[ 21 ] != 0 || a[ 22 ] != 0 || a[ 23 ] != 0 )
+			continue;
+		glm::vec3 p0( a[ 0 ], a[ 1 ], a[ 2 ] ), p1( a[ 18 ], a[ 19 ], a[ 20 ] ), p2( a[ 36 ], a[ 37 ], a[ 38 ] );
+		glm::vec3 n = glm::cross( p1 - p0, p2 - p0 );
+		float l     = glm::length( n );
+		if( l <= 0 )
+			continue;
+		n /= l;
+		for( int k = 0; k < 3; ++k )
+		{
+			a[ k * 18 + 3 ] = n.x;
+			a[ k * 18 + 4 ] = n.y;
+			a[ k * 18 + 5 ] = n.z;
+		}
+	}
 	return !out.empty();
+}
+
+// boîte englobante des positions (18 flottants par sommet, position en tête)
+void ObjBounds( const std::vector< float >& v, float mn[ 3 ], float mx[ 3 ] )
+{
+	for( int k = 0; k < 3; ++k )
+	{
+		mn[ k ] = 1e30f;
+		mx[ k ] = -1e30f;
+	}
+	for( size_t i = 0; i + 2 < v.size(); i += 18 )
+		for( int k = 0; k < 3; ++k )
+		{
+			mn[ k ] = std::min( mn[ k ], v[ i + k ] );
+			mx[ k ] = std::max( mx[ k ], v[ i + k ] );
+		}
 }
 
 const char* kCanvasVS = R"(#version 330
@@ -597,8 +632,15 @@ bool Renderer::BuildPass( const Pass& p, GpuPass& gp, std::string& log )
 		else if( it.kind == ItemKind::Model )
 		{
 			std::vector< float > verts;
+			auto files = ModelFiles( *proj );
+			for( size_t k = 0; k < files.size() && k < 2; ++k )
+				if( files[ k ] == it.modelPath )
+					gi.modelIndex = (int)k;
+			gi.modelKey = it.modelPath;
 			if( LoadObj( it.modelPath, it.modelGroup, it.modelGroupOnly, verts ) )
 			{
+				ObjBounds( verts, gi.boxMin, gi.boxMax );
+				gi.hasBox = true;
 				glGenBuffers( 1, &gi.vbo );
 				glBindBuffer( GL_ARRAY_BUFFER, gi.vbo );
 				glBufferData( GL_ARRAY_BUFFER, verts.size() * sizeof( float ), verts.data(), GL_STATIC_DRAW );
@@ -1239,10 +1281,66 @@ void Renderer::DrawGodot( GpuPass& gp, const Frame& f )
 	glDisable( GL_BLEND );
 }
 
+std::vector< std::string > Renderer::ModelFiles( const Project& p )
+{
+	std::vector< std::string > files;
+	for( auto& pass : p.passes )
+		for( auto& it : pass.items )
+			if( it.kind == ItemKind::Model && std::find( files.begin(), files.end(), it.modelPath ) == files.end() )
+				files.push_back( it.modelPath );
+	return files;
+}
+
+// Modèles remplacés depuis Resolume : rechargés quand le fichier choisi change
+void Renderer::UpdateModels( const Frame& f )
+{
+	for( auto& gp : passes )
+		for( auto& gi : gp.items )
+		{
+			if( gi.modelIndex < 0 || gi.modelIndex > 1 || !gi.item )
+				continue;
+			const std::string& over = f.modelPath[ gi.modelIndex ];
+			bool replaced           = !over.empty();
+			std::string key         = replaced ? over + ( f.modelFit ? "#fit" : "" ) : gi.item->modelPath;
+			if( key == gi.modelKey )
+				continue;
+			gi.modelKey = key;
+			std::vector< float > verts;
+			bool ok = replaced ? LoadObj( over, "", false, verts ) : LoadObj( gi.item->modelPath, gi.item->modelGroup, gi.item->modelGroupOnly, verts );
+			if( !ok )
+			{
+				proj->warnings.push_back( "Modèle illisible : " + ( replaced ? over : gi.item->modelPath ) );
+				continue;
+			}
+			if( replaced && f.modelFit && gi.hasBox )
+			{
+				// même centre et même plus grande dimension que le modèle d'origine
+				float mn[ 3 ], mx[ 3 ];
+				ObjBounds( verts, mn, mx );
+				float so = std::max( { gi.boxMax[ 0 ] - gi.boxMin[ 0 ], gi.boxMax[ 1 ] - gi.boxMin[ 1 ], gi.boxMax[ 2 ] - gi.boxMin[ 2 ] } );
+				float sn = std::max( { mx[ 0 ] - mn[ 0 ], mx[ 1 ] - mn[ 1 ], mx[ 2 ] - mn[ 2 ] } );
+				float sc = sn > 1e-9f ? so / sn : 1.0f;
+				for( size_t i = 0; i + 2 < verts.size(); i += 18 )
+					for( int k = 0; k < 3; ++k )
+						verts[ i + k ] = ( verts[ i + k ] - ( mn[ k ] + mx[ k ] ) * 0.5f ) * sc + ( gi.boxMin[ k ] + gi.boxMax[ k ] ) * 0.5f;
+			}
+			if( !gi.vbo )
+			{
+				glGenBuffers( 1, &gi.vbo );
+				CreateVAO( gi.vao, gi.vbo, gp.pass->inputLayout );
+			}
+			glBindBuffer( GL_ARRAY_BUFFER, gi.vbo );
+			glBufferData( GL_ARRAY_BUFFER, verts.size() * sizeof( float ), verts.data(), GL_STATIC_DRAW );
+			glBindBuffer( GL_ARRAY_BUFFER, 0 );
+			gi.vertexCount = (int)( verts.size() / 18 );
+		}
+}
+
 void Renderer::Render( const Frame& f )
 {
 	if( !proj )
 		return;
+	UpdateModels( f );
 	ResizeTargets( std::max( 1, f.width ), std::max( 1, f.height ) );
 
 	GLuint prevTex[ 8 ] = {};

@@ -261,7 +261,8 @@ bool ConvertMain( const std::string& src, MainStyle& out, std::string& err )
 				repl         = "iChannel0";
 				out.feedback = true;
 			}
-			else if( type == "sampler2D" && ( l == "u_audio" || l == "audio" || l == "u_sound" || l == "sound" || l == "u_fft" || l == "fft" ) )
+			else if( type == "sampler2D" && std::regex_search( l, std::regex( "audio|sound|fft|spectrum|music|freq" ) ) &&
+					 !std::regex_search( l, std::regex( "^(u_)?(tex|texture|image|img)\\d*$" ) ) )
 			{
 				repl      = "iChannel1";
 				out.audio = true;
@@ -639,8 +640,13 @@ bool ConvertShaderoo( const json& b, json& out, std::string& title, std::string&
 			std::string lt = ToLower( t );
 			if( bl >= 0 )
 				in.push_back( BufferInput( (int)i, bl ) );
-			else if( std::regex_search( lt, std::regex( R"(\.(webm|mp4|ogv|mov)(\?|$))" ) ) )
+			else if( std::regex_search( lt, std::regex( R"(\.(webm|mp4|ogv|mov)(\?|$))" ) ) || lt == "webcam" || lt == "video" )
 				in.push_back( SimpleInput( (int)i, "video" ) );
+			else if( std::regex_search( lt, std::regex( R"(\.(mp3|ogg|oga|wav|m4a|flac|aac|opus)(\?|$)|soundcloud\.com)" ) ) ||
+					 lt == "mic" || lt == "microphone" || lt == "audio" || lt == "sound" || lt == "music" || lt == "fft" )
+				in.push_back( SimpleInput( (int)i, "music" ) );// son -> spectre audio de Resolume
+			else if( lt == "keyboard" )
+				in.push_back( SimpleInput( (int)i, "keyboard" ) );
 			else
 			{
 				TexInfo ti = texSrc( t );
@@ -861,6 +867,28 @@ bool ConvertFragCoord( const json& b, json& out, std::string& title, std::string
 	for( auto& a : aux )
 		a.code = clean( a.code );
 
+	// u_audio de FragCoord : 512x512, x = fréquence, R = FFT pondérée, G = forme d'onde, B = FFT brute.
+	// Le spectre de Resolume est au format Shadertoy (ligne 0 = FFT, ligne 1 = forme d'onde) : on adapte les lectures.
+	std::vector< std::string > audioNames = { "u_audio" };
+	for( auto& kv : customTex )
+		if( std::regex_search( ToLower( kv.second ), std::regex( R"(\.(mp3|ogg|oga|wav|m4a|flac|aac|opus)(\?|$))" ) ) )
+			audioNames.push_back( kv.first );
+	bool audioWrapped = false;
+	auto wrapAudio    = [ & ]( std::string& code ) {
+		for( auto& n : audioNames )
+		{
+			std::string before = code;
+			code = std::regex_replace( code, std::regex( "\\b(texture2D|texture)\\s*\\(\\s*" + n + "\\s*," ), "stfx_fcAudio( " + n + "," );
+			code = std::regex_replace( code, std::regex( "\\btextureLod\\s*\\(\\s*" + n + "\\s*," ), "stfx_fcAudioLod( " + n + "," );
+			code = std::regex_replace( code, std::regex( "\\btexelFetch\\s*\\(\\s*" + n + "\\s*," ), "stfx_fcAudioFetch( " + n + "," );
+			audioWrapped = audioWrapped || code != before;
+		}
+	};
+	wrapAudio( common );
+	wrapAudio( mainCode );
+	for( auto& a : aux )
+		wrapAudio( a.code );
+
 	auto uses = []( const std::string& code, const std::string& n ) { return std::regex_search( code, std::regex( "\\b" + n + "\\b" ) ); };
 	bool mainFeedback = uses( common, "u_main" ) || uses( mainCode, "u_main" );
 	for( auto& a : aux )
@@ -895,6 +923,8 @@ bool ConvertFragCoord( const json& b, json& out, std::string& title, std::string
 		if( n == "u_keyboard" )
 			return SimpleInput( ch, "keyboard" );
 		std::string url = customTex.count( n ) ? customTex[ n ] : std::string();
+		if( std::regex_search( ToLower( url ), std::regex( R"(\.(mp3|ogg|oga|wav|m4a|flac|aac|opus)(\?|$))" ) ) )
+			return SimpleInput( ch, "music" );// fichier son -> spectre audio de Resolume
 		if( url.rfind( "data:image/", 0 ) == 0 )
 			url = SaveDataUrl( url, "fragcoord_" + ShortHash( url ) );
 		else if( url.rfind( "http", 0 ) != 0 )
@@ -928,6 +958,11 @@ bool ConvertFragCoord( const json& b, json& out, std::string& title, std::string
 						 "#define u_color_gamut 0\n#define u_recursion 0\n#define u_max_recursion 1\n";
 	for( auto& kv : global )
 		header += "#define " + kv.first + " iChannel" + std::to_string( kv.second ) + "\n";
+	if( audioWrapped )
+		header += "vec4 stfx_fcAudio( sampler2D s, vec2 uv ) { float f = texture( s, vec2( uv.x, 0.25 ) ).x; float w = texture( s, vec2( uv.x, 0.75 ) ).x; return vec4( f, w, f, 1.0 ); }\n"
+				  "vec4 stfx_fcAudio( sampler2D s, vec2 uv, float b ) { return stfx_fcAudio( s, uv ); }\n"
+				  "vec4 stfx_fcAudioLod( sampler2D s, vec2 uv, float l ) { return stfx_fcAudio( s, uv ); }\n"
+				  "vec4 stfx_fcAudioFetch( sampler2D s, ivec2 p, int l ) { return stfx_fcAudio( s, ( vec2( p ) + 0.5 ) / 512.0 ); }\n";
 
 	auto makePassCode = [ & ]( const std::string& code, const std::string& passName, json& inputs ) -> std::string {
 		std::map< std::string, int > local = global;

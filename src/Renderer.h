@@ -33,6 +33,9 @@ struct FrameInputs
 	// 0 = celui du shader, 1 = entrée Resolume, 2 = image choisie, 3 = audio, 4 = noir
 	int chMode[ 4 ] = {};
 	bool aspectFix = false;// recale l'entrée pour les shaders qui font uv.x *= iResolution.x / iResolution.y
+	// projets SHADERed : modèles .obj choisis dans Resolume (vide = modèle du projet)
+	std::string modelPath[ 2 ];
+	bool modelFit = true;
 };
 
 enum ChannelOverride
