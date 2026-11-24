@@ -6,6 +6,7 @@
 #include "License.h"
 #include "Preview.h"
 #include "sed/SedArchive.h"
+#include "Sites.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -28,6 +29,7 @@
 #include <deque>
 #include <ctime>
 #include <algorithm>
+#include <regex>
 #include <cmath>
 #include <filesystem>
 
@@ -472,6 +474,26 @@ void ScanDownloads()
 		else
 			Toast( "Importé depuis Téléchargements : " + title );
 	}
+	// exports du favori universel (ShaderKit, FragCoord, Shaderoo, NEORT)
+	for( const std::string& file : sites::FindDownloadedExports() )
+	{
+		int& fails = g_importFailures[ file ];
+		if( fails >= 5 )
+			continue;
+		std::string saved, title, err;
+		if( !sites::ImportDownloadedExport( file, saved, title, err ) )
+		{
+			if( ++fails >= 5 )
+				Toast( "Import impossible : " + FileStem( file ) + " (" + err + ")" );
+			continue;
+		}
+		g_importFailures.erase( file );
+		g_ui->localDirty = true;
+		if( g_ui->settings.autoLoadDownloads && Target() )
+			LoadPath( saved );
+		else
+			Toast( "Importé : " + title );
+	}
 	// projets exportés par le favori SHADERed
 	for( const std::string& file : sed::FindDownloadedProjects() )
 	{
@@ -499,18 +521,29 @@ void ShaderedBookmarkletHelp()
 {
 	ImGui::PushStyleColor( ImGuiCol_ChildBg, ImVec4( 0.10f, 0.13f, 0.17f, 1 ) );
 	ImGui::BeginChild( "sedbm", ImVec2( 0, 0 ), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY );
-	ImGui::TextColored( ImVec4( 0.5f, 0.8f, 1.0f, 1 ), "Favori SHADERed : import depuis ton navigateur" );
-	ImGui::TextWrapped( "1. Clique « Copier le favori SHADERed », crée un favori dans ton navigateur et colle le texte comme adresse (URL)." );
-	ImGui::TextWrapped( "2. Ouvre un shader sur shadered.org et clique ce favori : le projet est téléchargé en « Titre [shadered-id].zip »." );
-	ImGui::TextWrapped( "3. ShaderToyFX le récupère dans tes Téléchargements, le range dans Documents\\ShaderToyFX\\SHADERed et le charge." );
-	if( ImGui::Button( "Copier le favori SHADERed" ) )
+	ImGui::TextColored( ImVec4( 0.5f, 0.8f, 1.0f, 1 ), "Favori universel : un seul favori pour tous les sites" );
+	ImGui::TextWrapped( "Shadertoy, SHADERed, ShaderKit, FragCoord, Shaderoo et NEORT." );
+	ImGui::TextWrapped( "1. Clique « Copier le favori universel », crée un favori dans ton navigateur et colle le texte comme adresse (URL)." );
+	ImGui::TextWrapped( "2. Ouvre un shader sur l'un de ces sites et clique ce favori : il est téléchargé dans tes Téléchargements." );
+	ImGui::TextWrapped( "3. ShaderToyFX le récupère, le convertit, le range dans Documents\\ShaderToyFX\\<site> et le charge." );
+	if( ImGui::Button( "Copier le favori universel" ) )
 	{
-		ImGui::SetClipboardText( sed::BookmarkletCode() );
-		Toast( "Favori SHADERed copié : colle-le comme URL d'un nouveau favori." );
+		ImGui::SetClipboardText( sites::UniversalBookmarkletCode() );
+		Toast( "Favori universel copié : colle-le comme URL d'un nouveau favori." );
 	}
 	ImGui::SameLine();
-	if( ImGui::Button( "Ouvrir shadered.org" ) )
-		OpenUrl( "https://shadered.org/shaders" );
+	if( ImGui::Button( "Sites…" ) )
+		ImGui::OpenPopup( "sitesPopup" );
+	if( ImGui::BeginPopup( "sitesPopup" ) )
+	{
+		const char* sitesList[][ 2 ] = { { "Shadertoy", "https://www.shadertoy.com/browse" }, { "SHADERed", "https://shadered.org/shaders" },
+										 { "ShaderKit", "https://shaderkit.com/browse" }, { "FragCoord", "https://fragcoord.xyz/explore" },
+										 { "Shaderoo", "https://shaderoo.org/?cmd=browse&sort=hot" }, { "NEORT", "https://neort.io/en" } };
+		for( auto& st : sitesList )
+			if( ImGui::MenuItem( st[ 0 ] ) )
+				OpenUrl( st[ 1 ] );
+		ImGui::EndPopup();
+	}
 	ImGui::SameLine();
 	ImGui::Checkbox( "Charger automatiquement##sed", &g_ui->settings.autoLoadDownloads );
 	if( DownloadsDir().empty() || !g_ui->settings.watchDownloads )
@@ -776,6 +809,20 @@ void TabLink()
 		ImGui::Spacing();
 		ShaderedBookmarkletHelp();
 		return;
+	}
+	// autres sites : import par le favori universel depuis la page du shader
+	{
+		static const std::regex reSite( R"((shaderkit\.com/s/|fragcoord\.xyz/s/|shaderoo\.org/.*shader=|neort\.io/(?:\w+/)?art/))", std::regex::icase );
+		if( std::regex_search( g_ui->link, reSite ) )
+		{
+			if( ImGui::Button( "Ouvrir la page" ) )
+				OpenUrl( Trim( g_ui->link ) );
+			ImGui::TextWrapped( "Ce site ne permet pas le téléchargement direct : ouvre la page puis clique ton favori universel. "
+								"Le shader arrive tout seul dans ShaderToyFX." );
+			ImGui::Spacing();
+			ShaderedBookmarkletHelp();
+			return;
+		}
 	}
 	std::string id     = ExtractShaderId( g_ui->link );
 	bool noKey         = Trim( g_ui->settings.apiKey ).empty();
@@ -1684,10 +1731,10 @@ void TabPrefs()
 		Toast( "Bookmarklet copié." );
 	}
 	ImGui::SameLine();
-	if( ImGui::Button( "Copier le favori SHADERed" ) )
+	if( ImGui::Button( "Copier le favori universel" ) )
 	{
-		ImGui::SetClipboardText( sed::BookmarkletCode() );
-		Toast( "Favori SHADERed copié." );
+		ImGui::SetClipboardText( sites::UniversalBookmarkletCode() );
+		Toast( "Favori universel copié (Shadertoy, SHADERed, ShaderKit, FragCoord, Shaderoo, NEORT)." );
 	}
 
 	ImGui::SeparatorText( "Navigation" );

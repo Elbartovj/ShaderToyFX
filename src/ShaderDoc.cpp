@@ -1,6 +1,7 @@
 #include "ShaderDoc.h"
 #include "Util.h"
 #include "Net.h"
+#include "Sites.h"
 #include "sed/SedProject.h"
 #include "sed/SedGodot.h"
 #include "sed/SedCompiler.h"
@@ -287,6 +288,14 @@ static bool ParseJsonDoc( const std::string& text, ShaderDoc& doc, std::string& 
 
 static bool ParseGlslDoc( const std::string& text, const std::string& pathHint, ShaderDoc& doc, std::string& err )
 {
+	// GLSL « main() » (GLSLSandbox, The Book of Shaders, NEORT…) : converti au format Shadertoy
+	if( text.find( "mainImage" ) == std::string::npos && std::regex_search( text, std::regex( R"(\bvoid\s+main\s*\()" ) ) )
+	{
+		std::string jsonText, e2;
+		if( sites::ConvertMainStyleGlsl( text, pathHint.empty() ? std::string() : FileStem( pathHint ), "", jsonText, e2 ) &&
+			ParseJsonDoc( jsonText, doc, err ) )
+			return true;
+	}
 	if( text.find( "mainImage" ) == std::string::npos )
 	{
 		err = "Pas de fonction mainImage() : ce n'est pas un shader au format Shadertoy";

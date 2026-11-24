@@ -82,6 +82,7 @@ Documents\ShaderToyFX\
 %APPDATA%\ShaderToyFX\settings.json   <- clé API et préférences
 %APPDATA%\ShaderToyFX\favorites.json  <- shaders favoris
 Documents\ShaderToyFX\SHADERed\     <- projets SHADERed (un dossier par projet) et shaders Godot
+Documents\ShaderToyFX\ShaderKit\ (FragCoord, Shaderoo, NEORT) <- imports du favori universel
 ```
 
 Un shader téléchargé est enregistré en `.json` et c'est ce fichier qui est stocké dans la composition. Le set fonctionne donc ensuite sans connexion.
@@ -99,6 +100,25 @@ Un shader téléchargé est enregistré en `.json` et c'est ce fichier qui est s
 | Passe *Sound*, passe *Cube A* | Non supportées : le shader est ignoré ou noir, avec un avertissement |
 
 Uniforms disponibles : `iResolution`, `iTime`, `iTimeDelta`, `iFrameRate`, `iFrame`, `iChannelTime[4]`, `iChannelResolution[4]`, `iMouse`, `iDate`, `iSampleRate`, `iChannel0..3`.
+
+## Favori universel : ShaderKit, FragCoord, Shaderoo, NEORT (et Shadertoy, SHADERed)
+
+Un seul favori suffit pour importer depuis six sites. Pas besoin d'extension Firefox : c'est un favori ordinaire, qui marche dans Firefox, Chrome et Edge.
+
+1. Dans le panneau, onglet LIEN ou PRÉFÉRENCES, clique **Copier le favori universel**.
+2. Dans ton navigateur, crée un favori (Ctrl+D, puis « Modifier »), nomme-le « → ShaderToyFX » et colle le texte comme **adresse (URL)**. Affiche la barre personnelle (Ctrl+Maj+B) pour l'avoir sous la main.
+3. Ouvre la page d'un shader, puis clique sur le favori. Le fichier téléchargé (`Titre [site-id].json`, `.glsl` ou `.zip`) est récupéré dans tes Téléchargements, converti, rangé dans `Documents\ShaderToyFX\<Site>\`, puis chargé.
+
+| Site | Page à ouvrir | Prise en charge |
+|---|---|---|
+| shadertoy.com | `/view/ID` | Toutes les passes, comme le bookmarklet Shadertoy |
+| shadered.org | `/view?s=ID` | Projet complet (voir plus bas) |
+| shaderkit.com | `/s/ID` | Image et buffers (feedback compris), Common, sliders des uniforms du site avec leurs plages |
+| fragcoord.xyz | `/s/ID` | Export « Shadertoy » du site. `u_audio` devient l'audio Resolume |
+| shaderoo.org | `?shader=ID` | Image, Buff_A..D, includes, textures intégrées et images. Non pris en charge : passes géométrie (`Geom_*`, maillages), tailles de buffer fixes (rendus à la taille de sortie) |
+| neort.io | `/art/ID` | Œuvres en GLSL (style GLSLSandbox : `resolution`, `time`, `mouse`, `backbuffer`). Les œuvres en JavaScript, p5.js ou three.js ne sont pas importables |
+
+Les fichiers `.frag` / `.glsl` avec `void main()` (style The Book of Shaders, GLSLSandbox, GLSL ES 3 avec `out vec4`) sont aussi convertis automatiquement quand tu les ouvres dans l'onglet FICHIER.
 
 ## Projets SHADERed et shaders Godot
 
