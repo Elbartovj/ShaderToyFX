@@ -28,17 +28,17 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item build/Release/ShaderToyFX.dll, build/Release/ShaderToyFX_Source.dll, README.md, bookmarklet.txt, "Installer le bouton ShaderToyFX.html", LICENSE dist/
-          Compress-Archive -Path dist/* -DestinationPath ShaderToyFX-win64.zip
+          Copy-Item build/Release/ShaderLoader.dll, build/Release/ShaderLoader_Source.dll, README.md, bookmarklet.txt, bookmarklet-universel.txt, "Installer le favori Shader Loader.html", LICENSE dist/
+          Compress-Archive -Path dist/* -DestinationPath ShaderLoader-win64.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ShaderToyFX-win64
-          path: ShaderToyFX-win64.zip
+          name: ShaderLoader-win64
+          path: ShaderLoader-win64.zip
 
       - name: Release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: ShaderToyFX-win64.zip
+          files: ShaderLoader-win64.zip
           tag_name: ${{ github.event.release.tag_name || github.ref_name }}

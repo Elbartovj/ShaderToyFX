@@ -316,7 +316,7 @@ const char* BookmarkletCode()
 {
 	return "javascript:(async()=>{try{"
 		   "const m=location.pathname.match(/\\/(?:view|embed)\\/(\\w{6})/);"
-		   "if(!m){alert('ShaderToyFX : ouvre d\\'abord un shader (shadertoy.com/view/...)');return;}"
+		   "if(!m){alert('Shader Loader : ouvre d\\'abord un shader (shadertoy.com/view/...)');return;}"
 		   "const id=m[1];"
 		   "const r=await fetch('/shadertoy',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},"
 		   "body:'s='+encodeURIComponent(JSON.stringify({shaders:[id]}))+'&nt=1&nl=1&np=1'});"
@@ -326,7 +326,7 @@ const char* BookmarkletCode()
 		   "const a=document.createElement('a');"
 		   "a.href=URL.createObjectURL(new Blob([JSON.stringify(s)],{type:'application/json'}));"
 		   "a.download=n+' ['+id+'].json';document.body.appendChild(a);a.click();a.remove();"
-		   "}catch(e){alert('ShaderToyFX : export impossible ('+e.message+'). Copie le code dans l\\'onglet FICHIER.');}})();";
+		   "}catch(e){alert('Shader Loader : export impossible ('+e.message+'). Copie le code dans l\\'onglet FICHIER.');}})();";
 }
 
 const char* const kRandomOnline = "*online*";

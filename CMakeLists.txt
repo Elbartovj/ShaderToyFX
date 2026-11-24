@@ -101,6 +101,6 @@ function(stfx_plugin target outname)
     endif()
 endfunction()
 
-stfx_plugin(ShaderToyFX_Effect ShaderToyFX)
-stfx_plugin(ShaderToyFX_Source ShaderToyFX_Source)
+stfx_plugin(ShaderToyFX_Effect ShaderLoader)
+stfx_plugin(ShaderToyFX_Source ShaderLoader_Source)
 target_compile_definitions(ShaderToyFX_Source PRIVATE STFX_SOURCE)

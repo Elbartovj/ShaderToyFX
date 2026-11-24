@@ -17,23 +17,23 @@ static const bool kIsSource = true;
 static CFFGLPluginInfo PluginInfo(
 	PluginFactory< ShaderToyFX >,
 	"STFS",
-	"ShaderToyFX Src",
+	"Shader Loader Src",
 	2, 1,
 	1, 0,
 	FF_SOURCE,
-	"Shadertoy shaders as a Resolume source (library: Browse Library)",
-	"ShaderToyFX - open source" );
+	"Shadertoy, SHADERed, ShaderKit, FragCoord, Shaderoo, NEORT shaders as a source (library: Browse Library)",
+	"Shader Loader - open source" );
 #else
 static const bool kIsSource = false;
 static CFFGLPluginInfo PluginInfo(
 	PluginFactory< ShaderToyFX >,
 	"STFX",
-	"ShaderToyFX",
+	"Shader Loader",
 	2, 1,
 	1, 0,
 	FF_EFFECT,
-	"Shadertoy shaders as a Resolume effect (library: Browse Library)",
-	"ShaderToyFX - open source" );
+	"Shadertoy, SHADERed, ShaderKit, FragCoord, Shaderoo, NEORT shaders as an effect (library: Browse Library)",
+	"Shader Loader - open source" );
 #endif
 
 static const unsigned int kFftSize = 512;
@@ -283,7 +283,7 @@ FFResult ShaderToyFX::InitGL( const FFGLViewportStruct* vp )
 {
 	if( !renderer.InitGL() )
 	{
-		FFGLLog::LogToHost( "ShaderToyFX: échec de l'initialisation OpenGL" );
+		FFGLLog::LogToHost( "Shader Loader: échec de l'initialisation OpenGL" );
 		return FF_FAIL;
 	}
 	glReady = true;
@@ -303,7 +303,7 @@ FFResult ShaderToyFX::InitGL( const FFGLViewportStruct* vp )
 		}
 	}
 	else
-		FFGLLog::LogToHost( ( "ShaderToyFX: shader par défaut invalide\n" + log ).c_str() );
+		FFGLLog::LogToHost( ( "Shader Loader: shader par défaut invalide\n" + log ).c_str() );
 	ResetClock();
 	return CFFGLPlugin::InitGL( vp );
 }
@@ -402,7 +402,7 @@ void ShaderToyFX::ApplyPending()
 			shared->lastBuildOk = false;
 			shared->status      = "Erreur de compilation : " + doc->title;
 			shared->log         = log + ( warnings.empty() ? "" : "\n" + warnings );
-			FFGLLog::LogToHost( ( "ShaderToyFX: " + shared->status + "\n" + log ).c_str() );
+			FFGLLog::LogToHost( ( "Shader Loader: " + shared->status + "\n" + log ).c_str() );
 		}
 	}
 	if( ok )

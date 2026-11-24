@@ -1,24 +1,27 @@
-# ShaderToyFX : shaders Shadertoy dans Resolume (FFGL)
+# Shader Loader : shaders Shadertoy, SHADERed, ShaderKit, FragCoord, Shaderoo et NEORT dans Resolume (FFGL)
+
+*Anciennement ShaderToyFX.*
 
 [![Build](../../actions/workflows/build.yml/badge.svg)](../../actions/workflows/build.yml)
 [![Licence : GPL v3](https://img.shields.io/badge/licence-GPLv3-blue.svg)](LICENSE)
 
 **Télécharger :** la dernière version (DLL prêtes à l'emploi) se trouve dans l'onglet [Releases](../../releases).
 
-ShaderToyFX est un plugin FFGL 2 pour Resolume Arena/Avenue 7.4+ (Windows 64 bits). Il exécute directement des shaders Shadertoy, y compris les shaders multi-passes (Buffer A à D, Common), sans conversion vers ISF. Il lit aussi les **projets [SHADERed](https://shadered.org)** (GLSL, GLSL ES, HLSL, GLSL Vulkan, Godot) et les **shaders Godot** `canvas_item`.
+Shader Loader est un plugin FFGL 2 pour Resolume Arena/Avenue 7.4+ (Windows 64 bits). Il exécute directement des shaders Shadertoy, y compris les shaders multi-passes (Buffer A à D, Common), sans conversion vers ISF. Il lit aussi les **projets [SHADERed](https://shadered.org)** (GLSL, GLSL ES, HLSL, GLSL Vulkan, Godot) et les **shaders Godot** `canvas_item`.
 
 Deux DLL sont produites :
 
 | DLL | Type Resolume | Usage |
 |---|---|---|
-| `ShaderToyFX.dll` | **Effet** | S'applique sur un clip ou une couche. L'image du dessous arrive dans les `iChannel` libres. |
-| `ShaderToyFX_Source.dll` | **Source** | Générateur autonome. Une source ne reçoit **aucune image de Resolume** : pour qu'un shader utilise ta vidéo ou les couches du dessous, utilise l'**effet** (sur le clip, la couche, un groupe, ou un clip *Video Router*). |
+| `ShaderLoader.dll` | **Effet** | S'applique sur un clip ou une couche. L'image du dessous arrive dans les `iChannel` libres. |
+| `ShaderLoader_Source.dll` | **Source** | Générateur autonome. Une source ne reçoit **aucune image de Resolume** : pour qu'un shader utilise ta vidéo ou les couches du dessous, utilise l'**effet** (sur le clip, la couche, un groupe, ou un clip *Video Router*). |
 
 ## Installation
 
-1. Copier `ShaderToyFX.dll` et/ou `ShaderToyFX_Source.dll` dans un dossier de plugins.
+1. Copier `ShaderLoader.dll` et/ou `ShaderLoader_Source.dll` dans un dossier de plugins.
    Par défaut : `Documents\Resolume Arena\Extra Effects`. On peut aussi ajouter un dossier dans *Preferences → Video → FFGL Plugins*.
-2. Redémarrer Resolume. L'effet apparaît sous le nom **ShaderToyFX**, la source sous **ShaderToyFX Src** (nom limité à 16 caractères par FFGL).
+   **Mise à jour depuis ShaderToyFX** : supprime `ShaderToyFX.dll` et `ShaderToyFX_Source.dll` avant de copier les nouvelles DLL. Les identifiants du plugin ne changent pas : tes compositions, ta bibliothèque, tes favoris et ta clé API sont conservés (les dossiers restent `Documents\ShaderToyFX` et `%APPDATA%\ShaderToyFX`).
+2. Redémarrer Resolume. L'effet apparaît sous le nom **Shader Loader**, la source sous **Shader Loader Src** (nom limité à 16 caractères par FFGL).
 3. Pour récupérer des shaders, deux modes sont possibles :
    - **sans clé API** (recommandé si la création de clé t'est refusée) : passe par le bookmarklet, voir ci-dessous ;
    - **avec une clé API** : <https://www.shadertoy.com/myapps>, à coller dans l'onglet **PRÉFÉRENCES**. Elle active la recherche intégrée et le Random en ligne.
@@ -28,9 +31,9 @@ Deux DLL sont produites :
 Un bookmarklet est un favori qui exécute un petit script sur la page ouverte.
 
 1. Dans le panneau, clique **Copier le bookmarklet** (onglet SHADERTOY ou PRÉFÉRENCES). Le même code se trouve dans `bookmarklet.txt`.
-2. Dans ton navigateur, crée un nouveau favori (Ctrl+D, puis « Modifier »), nomme-le « → ShaderToyFX » et colle le code comme **URL**.
+2. Dans ton navigateur, crée un nouveau favori (Ctrl+D, puis « Modifier »), nomme-le « → Shader Loader » et colle le code comme **URL**.
 3. Ouvre n'importe quel shader sur shadertoy.com, puis clique sur ce favori. Le shader complet (toutes ses passes) est téléchargé sous la forme `Titre [id].json`.
-4. ShaderToyFX surveille ton dossier **Téléchargements** pendant que le panneau est ouvert, même s'il est en arrière-plan. Il déplace le fichier dans `Documents\ShaderToyFX\Shadertoy` et, si l'option est cochée, le charge directement dans l'instance ciblée.
+4. Shader Loader surveille ton dossier **Téléchargements** pendant que le panneau est ouvert, même s'il est en arrière-plan. Il déplace le fichier dans `Documents\ShaderToyFX\Shadertoy` et, si l'option est cochée, le charge directement dans l'instance ciblée.
 
 Sans clé, le bouton **Rechercher** ouvre la recherche dans ton navigateur, et **Aléatoire** pioche dans tes shaders déjà importés. Le bookmarklet fonctionne aussi pour les shaders publiés en « Public » seulement, puisqu'il passe par la page que tu consultes.
 
@@ -89,7 +92,7 @@ Un shader téléchargé est enregistré en `.json` et c'est ce fichier qui est s
 
 ## Correspondance des entrées Shadertoy
 
-| Entrée Shadertoy | Dans ShaderToyFX |
+| Entrée Shadertoy | Dans Shader Loader |
 |---|---|
 | Buffer A à D | Buffers flottants RGBA32F en ping-pong, avec le même ordre et le même feedback que sur le site |
 | Texture, Cubemap, Volume (`.bin`) | Téléchargés depuis shadertoy.com, puis mis en cache |
@@ -105,8 +108,8 @@ Uniforms disponibles : `iResolution`, `iTime`, `iTimeDelta`, `iFrameRate`, `iFra
 
 Un seul favori suffit pour importer depuis six sites. Pas besoin d'extension Firefox : c'est un favori ordinaire, qui marche dans Firefox, Chrome et Edge.
 
-1. Dans le panneau, onglet LIEN ou PRÉFÉRENCES, clique **Copier le favori universel**.
-2. Dans ton navigateur, crée un favori (Ctrl+D, puis « Modifier »), nomme-le « → ShaderToyFX » et colle le texte comme **adresse (URL)**. Affiche la barre personnelle (Ctrl+Maj+B) pour l'avoir sous la main.
+1. Le plus simple : ouvre `Installer le favori Shader Loader.html` (dans le zip) et fais glisser le bouton bleu dans ta barre de favoris, puis passe à l'étape 3. Sinon, dans le panneau, onglet LIEN ou PRÉFÉRENCES, clique **Copier le favori universel** (le même code est dans `bookmarklet-universel.txt`).
+2. Dans ton navigateur, crée un favori (Ctrl+D, puis « Modifier »), nomme-le « → Shader Loader » et colle le texte comme **adresse (URL)**. Affiche la barre personnelle (Ctrl+Maj+B) pour l'avoir sous la main.
 3. Ouvre la page d'un shader, puis clique sur le favori. Le fichier téléchargé (`Titre [site-id].json`, `.glsl` ou `.zip`) est récupéré dans tes Téléchargements, converti, rangé dans `Documents\ShaderToyFX\<Site>\`, puis chargé.
 
 | Site | Page à ouvrir | Prise en charge |
@@ -122,9 +125,9 @@ Les fichiers `.frag` / `.glsl` avec `void main()` (style The Book of Shaders, GL
 
 ## Projets SHADERed et shaders Godot
 
-ShaderToyFX exécute les projets [SHADERed](https://shadered.org) avec le même moteur que SHADERed : passes de rendu et compute, géométries (cube, sphère, plan, quad plein écran…), modèles `.obj`, render textures, états de rendu (fusion, profondeur, stencil, fil de fer), instanciation, buffers, cubemaps, tessellation et geometry shaders, variables système (`Time`, `ViewportSize`, `MousePosition`, matrices de caméra…) et fonctions.
+Shader Loader exécute les projets [SHADERed](https://shadered.org) avec le même moteur que SHADERed : passes de rendu et compute, géométries (cube, sphère, plan, quad plein écran…), modèles `.obj`, render textures, états de rendu (fusion, profondeur, stencil, fil de fer), instanciation, buffers, cubemaps, tessellation et geometry shaders, variables système (`Time`, `ViewportSize`, `MousePosition`, matrices de caméra…) et fonctions.
 
-- **Favori SHADERed** (comme le bookmarklet Shadertoy) : dans l'onglet LIEN, clique *Copier le favori SHADERed*, crée un favori dans ton navigateur et colle le texte comme adresse. Sur la page d'un shader de shadered.org, ce favori télécharge le projet en `Titre [shadered-id].zip`. ShaderToyFX le récupère dans tes Téléchargements, le range dans la bibliothèque, supprime l'archive et charge le projet.
+- **Favori SHADERed** (comme le bookmarklet Shadertoy) : dans l'onglet LIEN, clique *Copier le favori SHADERed*, crée un favori dans ton navigateur et colle le texte comme adresse. Sur la page d'un shader de shadered.org, ce favori télécharge le projet en `Titre [shadered-id].zip`. Shader Loader le récupère dans tes Téléchargements, le range dans la bibliothèque, supprime l'archive et charge le projet.
 - **Charger** : colle un lien `https://shadered.org/view?s=…` dans l'onglet LIEN. Ou bien ouvre un `.sprj` ou l'archive `.zip` téléchargée sur shadered.org dans l'onglet FICHIER. Le projet est copié, avec ses textures, dans `Documents\ShaderToyFX\SHADERed\` et apparaît dans la BIBLIOTHÈQUE (aperçu, favoris, dossiers, aléatoire).
 - **Langages** :
 
@@ -158,11 +161,11 @@ Un fichier `.glsl` contient une passe Image avec `mainImage()`, comme sur Shader
 - les **`#define` numériques** (`#define SPEED 1.5`, `#define STEPS 64`) ;
 - les **constantes globales** (`const float GLOW = 0.8;`, `const int OCTAVES = 5;`, `const vec3 COLOR = vec3(1., .5, .2);` donne trois sliders `COLOR.r/.g/.b`).
 
-Ainsi, la plupart des shaders Shadertoy deviennent réglables sans modification. Sont volontairement exclues les valeurs qui doivent rester constantes en GLSL : taille de tableau, `#if`, `case`, initialisation d'une autre constante ou d'une variable globale, ainsi que PI/TAU et les valeurs inutilisées. Si un cas particulier empêche quand même la compilation, ShaderToyFX retire le paramètre fautif et l'indique en bas de la fenêtre.
+Ainsi, la plupart des shaders Shadertoy deviennent réglables sans modification. Sont volontairement exclues les valeurs qui doivent rester constantes en GLSL : taille de tableau, `#if`, `case`, initialisation d'une autre constante ou d'une variable globale, ainsi que PI/TAU et les valeurs inutilisées. Si un cas particulier empêche quand même la compilation, Shader Loader retire le paramètre fautif et l'indique en bas de la fenêtre.
 
 **Le milieu de chaque slider correspond exactement à la valeur d'origine du shader** : à l'import, les sliders donnent donc le même rendu que sur Shadertoy, et *réinitialiser* un paramètre dans Resolume y revient. La plage va de 0 au double de cette valeur (entiers : de 1 à 2×−1).
 
-Pour que le rendu reste identique à Shadertoy une fois les valeurs transformées en sliders, ShaderToyFX :
+Pour que le rendu reste identique à Shadertoy une fois les valeurs transformées en sliders, Shader Loader :
 - n'expose pas les réglages sans effet (utilisés seulement dans un bloc `#ifdef` désactivé ou par une fonction jamais appelée), ni les codes de touches et les vecteurs de direction ;
 - initialise à zéro les variables locales déclarées sans valeur, comme le fait le navigateur sur Shadertoy ;
 - calcule `pow()` d'un nombre négatif avec un exposant entier comme le compilateur de Shadertoy (au lieu de renvoyer NaN). Pour fixer une plage, ajoute `// min max défaut` en fin de ligne. L'onglet ÉDITEUR liste les paramètres détectés, sous « Paramètres réglables dans Resolume ».
@@ -221,6 +224,6 @@ Les téléchargements et le décodage d'images se font sur des threads de travai
 
 ## Licence
 
-ShaderToyFX est un logiciel libre sous licence **GNU GPL v3** (voir [`LICENSE`](LICENSE)). Les composants tiers inclus et leurs licences sont listés dans [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+Shader Loader est un logiciel libre sous licence **GNU GPL v3** (voir [`LICENSE`](LICENSE)). Les composants tiers inclus et leurs licences sont listés dans [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 Ce projet n'est affilié ni à Shadertoy, ni à Resolume, ni à Headsta.sh. Les shaders que tu importes restent sous la licence de leurs auteurs.

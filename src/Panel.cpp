@@ -405,7 +405,7 @@ void LoadSummary( const ShaderSummary& s )
 	SharedPtr t = Target();
 	if( !t )
 	{
-		Toast( "Aucune instance ShaderToyFX active." );
+		Toast( "Aucune instance Shader Loader active." );
 		return;
 	}
 	std::string path = SaveToCache( s );
@@ -419,7 +419,7 @@ void LoadPath( const std::string& path )
 	SharedPtr t = Target();
 	if( !t )
 	{
-		Toast( "Aucune instance ShaderToyFX active." );
+		Toast( "Aucune instance Shader Loader active." );
 		return;
 	}
 	RequestLoadFile( t, path, true );
@@ -525,7 +525,7 @@ void ShaderedBookmarkletHelp()
 	ImGui::TextWrapped( "Shadertoy, SHADERed, ShaderKit, FragCoord, Shaderoo et NEORT." );
 	ImGui::TextWrapped( "1. Clique « Copier le favori universel », crée un favori dans ton navigateur et colle le texte comme adresse (URL)." );
 	ImGui::TextWrapped( "2. Ouvre un shader sur l'un de ces sites et clique ce favori : il est téléchargé dans tes Téléchargements." );
-	ImGui::TextWrapped( "3. ShaderToyFX le récupère, le convertit, le range dans Documents\\ShaderToyFX\\<site> et le charge." );
+	ImGui::TextWrapped( "3. Shader Loader le récupère, le convertit, le range dans Documents\\ShaderToyFX\\<site> et le charge." );
 	if( ImGui::Button( "Copier le favori universel" ) )
 	{
 		ImGui::SetClipboardText( sites::UniversalBookmarkletCode() );
@@ -567,7 +567,7 @@ void NoKeyHelp()
 	ImGui::TextColored( ImVec4( 1, 0.8f, 0.4f, 1 ), "Mode sans clé API : import via ton navigateur" );
 	ImGui::TextWrapped( "1. Clique « Copier le bookmarklet », crée un favori dans ton navigateur et colle le texte comme adresse (URL)." );
 	ImGui::TextWrapped( "2. Ouvre un shader sur shadertoy.com et clique ce favori : le shader est téléchargé en « Titre [id].json »." );
-	ImGui::TextWrapped( "3. ShaderToyFX le récupère dans tes Téléchargements, le range dans Documents\\ShaderToyFX\\Shadertoy et le charge." );
+	ImGui::TextWrapped( "3. Shader Loader le récupère dans tes Téléchargements, le range dans Documents\\ShaderToyFX\\Shadertoy et le charge." );
 	if( ImGui::Button( "Copier le bookmarklet" ) )
 	{
 		ImGui::SetClipboardText( BookmarkletCode() );
@@ -818,7 +818,7 @@ void TabLink()
 			if( ImGui::Button( "Ouvrir la page" ) )
 				OpenUrl( Trim( g_ui->link ) );
 			ImGui::TextWrapped( "Ce site ne permet pas le téléchargement direct : ouvre la page puis clique ton favori universel. "
-								"Le shader arrive tout seul dans ShaderToyFX." );
+								"Le shader arrive tout seul dans Shader Loader." );
 			ImGui::Spacing();
 			ShaderedBookmarkletHelp();
 			return;
@@ -835,7 +835,7 @@ void TabLink()
 		else if( noKey )
 		{
 			OpenUrl( "https://www.shadertoy.com/view/" + id );
-			Toast( "Page ouverte : clique ton favori ShaderToyFX pour l'importer." );
+			Toast( "Page ouverte : clique ton favori Shader Loader pour l'importer." );
 		}
 		else if( SharedPtr t = Target() )
 		{
@@ -1944,7 +1944,7 @@ void PanelThread()
 		ReleaseDC( nullptr, screen );
 	scale = std::max( 1.0f, scale );
 
-	HWND hwnd = CreateWindowExW( 0, wc.lpszClassName, L"ShaderToyFX — Shader Library", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+	HWND hwnd = CreateWindowExW( 0, wc.lpszClassName, L"Shader Loader — Shader Library", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
 								 (int)( 1180 * scale ), (int)( 720 * scale ), nullptr, nullptr, inst, nullptr );
 	if( !hwnd || !CreateDevice( hwnd ) )
 	{

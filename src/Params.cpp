@@ -1,4 +1,4 @@
-// ShaderToyFX - détection des paramètres réglables d'un shader
+// Shader Loader - détection des paramètres réglables d'un shader
 //
 // Les shaders Shadertoy n'ont pas d'"inputs" : leurs réglages sont des #define et des constantes
 // globales. On les transforme en uniforms (donc en sliders Resolume) quand c'est sans danger :
@@ -889,7 +889,7 @@ std::string ApplyParamRewrites( const std::string& code, const std::vector< User
 		{
 			const UserParam& p = *it->second;
 			std::string type   = p.vecSize > 1 ? "vec" + std::to_string( p.vecSize ) : ( p.isInt ? "int" : "float" );
-			result             = "uniform " + type + " " + p.uniform + "; // ShaderToyFX : réglable dans Resolume";
+			result             = "uniform " + type + " " + p.uniform + "; // Shader Loader : réglable dans Resolume";
 		}
 		out += result;
 		if( li + 1 < lines.size() )
