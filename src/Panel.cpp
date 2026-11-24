@@ -472,6 +472,53 @@ void ScanDownloads()
 		else
 			Toast( "Importé depuis Téléchargements : " + title );
 	}
+	// projets exportés par le favori SHADERed
+	for( const std::string& file : sed::FindDownloadedProjects() )
+	{
+		int& fails = g_importFailures[ file ];
+		if( fails >= 5 )
+			continue;
+		std::string sprj, title, err;
+		if( !sed::ImportDownloadedProject( file, sprj, title, err ) )
+		{
+			if( ++fails >= 5 )
+				Toast( "Archive SHADERed illisible : " + FileStem( file ) + " (" + err + ")" );
+			continue;
+		}
+		g_importFailures.erase( file );
+		g_ui->localDirty = true;
+		if( g_ui->settings.autoLoadDownloads && Target() )
+			LoadPath( sprj );
+		else
+			Toast( "Projet SHADERed importé : " + title );
+	}
+}
+
+// Encadré du favori shadered.org (onglet LIEN et Préférences)
+void ShaderedBookmarkletHelp()
+{
+	ImGui::PushStyleColor( ImGuiCol_ChildBg, ImVec4( 0.10f, 0.13f, 0.17f, 1 ) );
+	ImGui::BeginChild( "sedbm", ImVec2( 0, 0 ), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY );
+	ImGui::TextColored( ImVec4( 0.5f, 0.8f, 1.0f, 1 ), "Favori SHADERed : import depuis ton navigateur" );
+	ImGui::TextWrapped( "1. Clique « Copier le favori SHADERed », crée un favori dans ton navigateur et colle le texte comme adresse (URL)." );
+	ImGui::TextWrapped( "2. Ouvre un shader sur shadered.org et clique ce favori : le projet est téléchargé en « Titre [shadered-id].zip »." );
+	ImGui::TextWrapped( "3. ShaderToyFX le récupère dans tes Téléchargements, le range dans Documents\\ShaderToyFX\\SHADERed et le charge." );
+	if( ImGui::Button( "Copier le favori SHADERed" ) )
+	{
+		ImGui::SetClipboardText( sed::BookmarkletCode() );
+		Toast( "Favori SHADERed copié : colle-le comme URL d'un nouveau favori." );
+	}
+	ImGui::SameLine();
+	if( ImGui::Button( "Ouvrir shadered.org" ) )
+		OpenUrl( "https://shadered.org/shaders" );
+	ImGui::SameLine();
+	ImGui::Checkbox( "Charger automatiquement##sed", &g_ui->settings.autoLoadDownloads );
+	if( DownloadsDir().empty() || !g_ui->settings.watchDownloads )
+		ImGui::TextColored( ImVec4( 1, 0.4f, 0.4f, 1 ), "Surveillance des Téléchargements désactivée (Préférences)." );
+	else
+		ImGui::TextDisabled( "Surveillé : %s", DownloadsDir().c_str() );
+	ImGui::EndChild();
+	ImGui::PopStyleColor();
 }
 
 std::string SearchUrl( const std::string& term )
@@ -726,6 +773,8 @@ void TabLink()
 		ImGui::Spacing();
 		ImGui::TextWrapped( "Le projet est enregistré dans Documents\\ShaderToyFX\\SHADERed et apparaît dans la BIBLIOTHÈQUE. "
 							"Les shaders Rust et C++ demandent un compilateur externe : exporte-les en GLSL/HLSL depuis SHADERed." );
+		ImGui::Spacing();
+		ShaderedBookmarkletHelp();
 		return;
 	}
 	std::string id     = ExtractShaderId( g_ui->link );
@@ -767,6 +816,8 @@ void TabLink()
 	else
 		ImGui::TextWrapped( "Avec la clé API, seuls les shaders publiés en \"Public + API\" sont accessibles. "
 							"Pour les autres, utilise le bookmarklet (mode sans clé) ou colle le code dans l'onglet FICHIER." );
+	ImGui::Spacing();
+	ShaderedBookmarkletHelp();
 }
 
 //------------------------------------------------------------------ onglet FICHIER
@@ -1631,6 +1682,12 @@ void TabPrefs()
 	{
 		ImGui::SetClipboardText( BookmarkletCode() );
 		Toast( "Bookmarklet copié." );
+	}
+	ImGui::SameLine();
+	if( ImGui::Button( "Copier le favori SHADERed" ) )
+	{
+		ImGui::SetClipboardText( sed::BookmarkletCode() );
+		Toast( "Favori SHADERed copié." );
 	}
 
 	ImGui::SeparatorText( "Navigation" );

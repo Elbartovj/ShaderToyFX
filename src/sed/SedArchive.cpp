@@ -152,6 +152,64 @@ bool DownloadShaderedProject( const std::string& id, std::string& sprjPath, std:
 	return ExtractProjectZip( r.body, dest, sprjPath, err );
 }
 
+const char* BookmarkletCode()
+{
+	// une seule ligne : c'est l'adresse (URL) du favori
+	return R"JS(javascript:(async()=>{try{const q=new URLSearchParams(location.search);const id=q.get('s')||q.get('id');if(!/shadered\.org$/i.test(location.hostname)||!id){alert('ShaderToyFX : ouvre d\'abord un shader sur shadered.org (shadered.org/view?s=...)');return;}const r=await fetch('/download?type=shader&id='+encodeURIComponent(id));if(!r.ok)throw new Error('HTTP '+r.status);const b=await r.blob();const u=new Uint8Array(await b.slice(0,2).arrayBuffer());if(u[0]!==80||u[1]!==75)throw new Error('le site n\'a pas renvoyé d\'archive');const clean=s=>(s||'').replace(/SHADERed/gi,'').replace(/^[\s\-|:–—]+|[\s\-|:–—]+$/g,'').trim();const h=document.querySelector('h1,h2,h3');let t=clean(document.title)||clean(h&&h.textContent)||id;t=t.replace(/[\\/:*?"<>|]/g,'_').slice(0,80);const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=t+' [shadered-'+id+'].zip';document.body.appendChild(a);a.click();a.remove();}catch(e){alert('ShaderToyFX : export impossible ('+e.message+'). Colle plutôt le lien dans l\'onglet LIEN.');}})();)JS";
+}
+
+std::vector< std::string > FindDownloadedProjects()
+{
+	std::vector< std::string > out;
+	std::string dir = DownloadsDir();
+	if( dir.empty() )
+		return out;
+	static const std::regex re( R"(\[shadered-[A-Za-z0-9_\-]+\]( \(\d+\))?\.zip$)", std::regex::icase );
+	std::error_code ec;
+	for( auto& e : fs::directory_iterator( P( dir ), ec ) )
+	{
+		if( !e.is_regular_file( ec ) )
+			continue;
+		std::string name = Narrow( e.path().filename().wstring() );
+		if( std::regex_search( name, re ) )
+			out.push_back( Narrow( e.path().wstring() ) );
+	}
+	return out;
+}
+
+bool ImportDownloadedProject( const std::string& zipFile, std::string& sprjPath, std::string& title, std::string& err )
+{
+	std::vector< uint8_t > data;
+	if( !ReadFileBytes( zipFile, data ) || data.size() < 22 )
+	{
+		err = "lecture impossible";
+		return false;
+	}
+	// « Titre [shadered-ID] (2).zip » -> « Titre [ID] »
+	std::string stem = FileStem( zipFile );
+	static const std::regex reDup( R"( \(\d+\)$)" );
+	stem = std::regex_replace( stem, reDup, "" );
+	static const std::regex reTag( R"(\[shadered-([A-Za-z0-9_\-]+)\])" );
+	std::smatch m;
+	std::string id;
+	if( std::regex_search( stem, m, reTag ) )
+		id = m[ 1 ].str();
+	title = Trim( std::regex_replace( stem, reTag, "" ) );
+	if( title.empty() )
+		title = "SHADERed";
+	std::string dest = JoinPath( ShaderedDir(), SanitizeFileName( title + ( id.empty() ? "" : " [" + id + "]" ) ) );
+	std::error_code ec;
+	fs::remove_all( P( dest ), ec );
+	sprjPath.clear();
+	if( !ExtractProjectZip( data, dest, sprjPath, err ) )
+	{
+		fs::remove_all( P( dest ), ec );
+		return false;
+	}
+	fs::remove( P( zipFile ), ec );
+	return true;
+}
+
 bool ImportIntoLibrary( const std::string& path, std::string& newPath, std::string& err )
 {
 	std::error_code ec;

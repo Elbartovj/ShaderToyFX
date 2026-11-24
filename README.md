@@ -104,6 +104,7 @@ Uniforms disponibles : `iResolution`, `iTime`, `iTimeDelta`, `iFrameRate`, `iFra
 
 ShaderToyFX exécute les projets [SHADERed](https://shadered.org) avec le même moteur que SHADERed : passes de rendu et compute, géométries (cube, sphère, plan, quad plein écran…), modèles `.obj`, render textures, états de rendu (fusion, profondeur, stencil, fil de fer), instanciation, buffers, cubemaps, tessellation et geometry shaders, variables système (`Time`, `ViewportSize`, `MousePosition`, matrices de caméra…) et fonctions.
 
+- **Favori SHADERed** (comme le bookmarklet Shadertoy) : dans l'onglet LIEN, clique *Copier le favori SHADERed*, crée un favori dans ton navigateur et colle le texte comme adresse. Sur la page d'un shader de shadered.org, ce favori télécharge le projet en `Titre [shadered-id].zip`. ShaderToyFX le récupère dans tes Téléchargements, le range dans la bibliothèque, supprime l'archive et charge le projet.
 - **Charger** : colle un lien `https://shadered.org/view?s=…` dans l'onglet LIEN. Ou bien ouvre un `.sprj` ou l'archive `.zip` téléchargée sur shadered.org dans l'onglet FICHIER. Le projet est copié, avec ses textures, dans `Documents\ShaderToyFX\SHADERed\` et apparaît dans la BIBLIOTHÈQUE (aperçu, favoris, dossiers, aléatoire).
 - **Langages** :
 
