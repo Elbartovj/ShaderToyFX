@@ -146,14 +146,28 @@ Les fichiers `.frag` / `.glsl` avec `void main()` (style The Book of Shaders, GL
 
 ## Améliorer un shader avec Claude
 
-Dans l'onglet **ÉDITEUR**, la rubrique **Améliorer avec Claude** réécrit le shader chargé à partir d'une consigne (« plus de contraste », « réagit aux basses », « ajoute des sliders pour la vitesse et la couleur »…).
+### Avec Claude Desktop (ton abonnement Claude, sans clé API)
 
-1. Ajoute ta clé API Anthropic dans **PRÉFÉRENCES** (bouton *Créer une clé Claude…*). Chaque amélioration est facturée sur ton compte Anthropic.
-2. Écris la consigne, choisis le modèle (Sonnet : rapide ; Opus : le plus capable ; Haiku : économique), puis clique **Améliorer**.
-3. Shader Loader vérifie que le résultat compile. Sinon, il renvoie les erreurs à Claude, qui corrige (jusqu'à 2 fois).
-4. Le résultat s'applique en direct dans Resolume. **Enregistrer** pour le garder, **Annuler l'amélioration** pour revenir en arrière.
+1. Double-clique **`Shader Loader pour Claude Desktop.mcpb`** (dans le zip) : Claude Desktop propose d'installer l'extension. Clique *Installer*. (Ou bouton *Installer l'extension…* dans l'onglet ÉDITEUR.)
+2. Dans Resolume, charge l'effet ou la source Shader Loader. Si tu en as plusieurs, sélectionne l'instance voulue dans le panneau.
+3. Dans Claude Desktop, demande par exemple : « Améliore l'effet chargé dans Shader Loader : réagit aux basses, plus saturé, ajoute des sliders vitesse et couleur ». Le bouton *Copier la demande* de l'ÉDITEUR prépare ce message.
 
-Claude garde les passes et le branchement des iChannels ; les nouveaux réglages qu'il ajoute (`#define`, `const`, `uniform … // min max défaut`) deviennent des sliders. Pas pour les projets SHADERed ni les shaders Godot.
+Claude utilise alors ces outils de l'extension :
+
+| Outil | Rôle |
+|---|---|
+| `list_instances` | Instances Shader Loader ouvertes dans Resolume (E1, E2… effets ; S1… sources) |
+| `get_shader` | Code des passes, branchement des iChannels, sliders, erreurs |
+| `update_shader` | Compile le nouveau code ; s'il compile, il est appliqué en direct, sinon les erreurs reviennent à Claude |
+| `capture_output` | Image du rendu actuel (le clip doit jouer), pour que Claude vérifie le résultat |
+| `save_shader` | Enregistre dans la bibliothèque (ou sous un nouveau nom) |
+| `revert_shader` | Recharge la version enregistrée |
+
+Tout passe par un canal local entre Claude Desktop et Resolume sur ton ordinateur ; rien n'est enregistré sans `save_shader`. Pas pour les projets SHADERed ni les shaders Godot.
+
+### Avec une clé API Anthropic (facturée à part)
+
+Dans l'onglet **ÉDITEUR**, rubrique **Améliorer avec Claude** : ajoute ta clé API Anthropic dans **PRÉFÉRENCES**, écris la consigne, choisis le modèle (Sonnet : rapide ; Opus : le plus capable ; Haiku : économique), puis **Améliorer (API)**. Shader Loader vérifie que le résultat compile et le fait corriger sinon (2 fois au plus), l'applique en direct ; **Enregistrer** pour le garder, **Annuler l'amélioration** pour revenir en arrière.
 
 ## Projets SHADERed et shaders Godot
 

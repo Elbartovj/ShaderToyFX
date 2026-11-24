@@ -1,4 +1,5 @@
 #include "Instance.h"
+#include "Bridge.h"
 #include "sed/SedArchive.h"
 #include "ShadertoyApi.h"
 #include "Util.h"
@@ -188,6 +189,7 @@ void RegisterInstance( const SharedPtr& s )
 	static int nextId = 1;
 	s->id = nextId++;
 	s_instances.push_back( s );
+	bridge::Start();
 }
 
 void UnregisterInstance( const SharedPtr& s )
@@ -202,6 +204,20 @@ void UnregisterInstance( const SharedPtr& s )
 						   return !sp || sp == s;
 					   } ),
 					   s_instances.end() );
+}
+
+static std::weak_ptr< InstanceShared > s_focused;
+
+void SetFocusedInstance( const SharedPtr& s )
+{
+	std::lock_guard< std::mutex > lock( s_regMutex );
+	s_focused = s;
+}
+
+SharedPtr FocusedInstance()
+{
+	std::lock_guard< std::mutex > lock( s_regMutex );
+	return s_focused.lock();
 }
 
 std::vector< SharedPtr > ListInstances()

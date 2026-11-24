@@ -1,0 +1,31 @@
+{
+  "manifest_version": "0.2",
+  "name": "shader-loader",
+  "display_name": "Shader Loader (Resolume)",
+  "version": "1.23.0",
+  "description": "Lets Claude read, improve, compile and capture the shaders loaded in the Shader Loader plugin for Resolume Arena.",
+  "long_description": "Connects Claude Desktop to the Shader Loader FFGL plugin running in Resolume Arena on this computer. Claude can read the loaded shader, rewrite it from your request, compile and apply it live, look at the rendered output and save it to your library. Everything stays on this computer (local named pipe).",
+  "author": { "name": "Shader Loader" },
+  "server": {
+    "type": "binary",
+    "entry_point": "server/ShaderLoaderMCP.exe",
+    "mcp_config": {
+      "command": "${__dirname}/server/ShaderLoaderMCP.exe",
+      "args": [],
+      "env": {}
+    }
+  },
+  "tools": [
+    { "name": "list_instances", "description": "List Shader Loader instances in Resolume" },
+    { "name": "get_shader", "description": "Read the loaded shader (passes, channels, sliders)" },
+    { "name": "update_shader", "description": "Compile and apply new shader code live" },
+    { "name": "capture_output", "description": "Picture of the rendered output" },
+    { "name": "save_shader", "description": "Save the shader to the library" },
+    { "name": "revert_shader", "description": "Reload the saved shader" }
+  ],
+  "prompts": [
+    { "name": "ameliorer_effet", "description": "Améliore l'effet chargé selon une consigne", "arguments": ["consigne"], "text": "Améliore l'effet chargé dans Shader Loader (Resolume) : ${arguments.consigne}" }
+  ],
+  "compatibility": { "platforms": ["win32"] },
+  "license": "MIT"
+}

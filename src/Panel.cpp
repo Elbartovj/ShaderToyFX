@@ -2062,6 +2062,30 @@ void SyncEditor( const InstanceSnapshot& snap )
 	g_ui->editorSelectImage = true;
 }
 
+// Extension Claude Desktop : « Shader Loader pour Claude Desktop.mcpb », cherchée à côté de la DLL puis dans Téléchargements
+std::string FindMcpbBundle()
+{
+	std::vector< std::string > dirs;
+	HMODULE h = nullptr;
+	GetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)&FindMcpbBundle, &h );
+	wchar_t buf[ MAX_PATH * 2 ] = {};
+	if( h && GetModuleFileNameW( h, buf, MAX_PATH * 2 ) )
+		dirs.push_back( ParentDir( Narrow( buf ) ) );
+	dirs.push_back( DownloadsDir() );
+	dirs.push_back( RootDir() );
+	for( auto& d : dirs )
+	{
+		std::error_code ec;
+		for( auto& f : std::filesystem::directory_iterator( std::filesystem::path( Widen( d ) ), ec ) )
+		{
+			std::string n = Narrow( f.path().filename().wstring() );
+			if( ToLower( FileExtLower( n ) ) == ".mcpb" && ToLower( n ).find( "shader loader" ) != std::string::npos )
+				return Narrow( f.path().wstring() );
+		}
+	}
+	return {};
+}
+
 //------------------------------------------------------------------ améliorateur (API Claude)
 struct ImproverState
 {
@@ -2263,11 +2287,7 @@ void TabEditor( const InstanceSnapshot& snap )
 		if( ImGui::CollapsingHeader( "Améliorer avec Claude###improve", ImGuiTreeNodeFlags_DefaultOpen ) )
 		{
 			Settings& st = g_ui->settings;
-			if( Trim( st.claudeKey ).empty() )
-			{
-				ImGui::TextColored( ImVec4( 1, 0.75f, 0.3f, 1 ), "Ajoute ta clé API Claude dans l'onglet PRÉFÉRENCES." );
-			}
-			ImGui::TextDisabled( "Décris ce qu'il faut changer : Claude réécrit le shader, Shader Loader vérifie qu'il compile (et le fait corriger sinon), puis l'applique." );
+			ImGui::TextDisabled( "Décris ce qu'il faut changer : Claude réécrit le shader, vérifie qu'il compile, l'applique en direct et peut regarder le rendu." );
 			ImGui::InputTextMultiline( "##iprompt", &g_impUi.prompt, ImVec2( -1, ImGui::GetTextLineHeight() * 3.6f ) );
 			if( g_impUi.prompt.empty() && !ImGui::IsItemActive() )
 			{
@@ -2275,6 +2295,44 @@ void TabEditor( const InstanceSnapshot& snap )
 				ImGui::GetWindowDrawList()->AddText( ImVec2( r0.x + 6, r0.y + 4 ), IM_COL32( 130, 130, 130, 255 ),
 													 "ex. : plus de contraste, réagit aux basses du son, ajoute des sliders pour la vitesse et la couleur…" );
 			}
+			// 1) Claude Desktop (abonnement Claude, sans clé API) : extension MCP locale
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextUnformatted( "Avec Claude Desktop :" );
+			ImGui::SameLine();
+			if( ImGui::Button( "Copier la demande" ) )
+			{
+				std::string ask = "Améliore l'effet chargé dans Shader Loader (Resolume) : " +
+								  ( Trim( g_impUi.prompt ).empty() ? std::string( "<ta consigne>" ) : Trim( g_impUi.prompt ) ) +
+								  "\nLis-le avec get_shader, applique la nouvelle version avec update_shader, regarde le rendu avec capture_output. "
+								  "N'enregistre pas sans me demander.";
+				ImGui::SetClipboardText( ask.c_str() );
+				Toast( "Demande copiée : colle-la dans Claude Desktop." );
+			}
+			ImGui::SameLine();
+			if( ImGui::Button( "Installer l'extension…" ) )
+			{
+				std::string bundle = FindMcpbBundle();
+				if( !bundle.empty() )
+				{
+					ShellExecuteW( nullptr, L"open", Widen( bundle ).c_str(), nullptr, nullptr, SW_SHOWNORMAL );
+					Toast( "Claude Desktop va proposer d'installer l'extension Shader Loader." );
+				}
+				else
+					Toast( "Double-clique « Shader Loader pour Claude Desktop.mcpb » (dans le zip de Shader Loader)." );
+			}
+			if( ImGui::BeginItemTooltip() )
+			{
+				ImGui::TextUnformatted( "Une fois l'extension installée dans Claude Desktop (Paramètres > Extensions), demande simplement à Claude\n"
+										"d'améliorer l'effet chargé dans Shader Loader : il lit le shader de l'instance sélectionnée ici,\n"
+										"applique ses changements en direct dans Resolume et peut capturer le rendu pour le vérifier.\n"
+										"Utilise ton abonnement Claude, sans clé API. Tout reste sur cet ordinateur." );
+				ImGui::EndTooltip();
+			}
+
+			// 2) clé API (facturée à part)
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextUnformatted( "Ou avec une clé API :" );
+			ImGui::SameLine();
 			const auto& models = claude::Models();
 			int mi             = 0;
 			for( int i = 0; i < (int)models.size(); ++i )
@@ -2293,7 +2351,7 @@ void TabEditor( const InstanceSnapshot& snap )
 			}
 			ImGui::SameLine();
 			ImGui::BeginDisabled( running || Trim( g_impUi.prompt ).empty() || Trim( st.claudeKey ).empty() );
-			if( ImGui::Button( "Améliorer" ) )
+			if( ImGui::Button( "Améliorer (API)" ) )
 			{
 				ShaderDoc doc         = EditedDoc();
 				std::string key       = st.claudeKey, model = st.claudeModel, prompt = g_impUi.prompt;
@@ -2336,6 +2394,11 @@ void TabEditor( const InstanceSnapshot& snap )
 				} ).detach();
 			}
 			ImGui::EndDisabled();
+			if( Trim( st.claudeKey ).empty() && ImGui::BeginItemTooltip() )
+			{
+				ImGui::TextUnformatted( "Ajoute une clé API Anthropic dans PRÉFÉRENCES (facturée sur ton compte Anthropic)." );
+				ImGui::EndTooltip();
+			}
 			if( running )
 			{
 				ImGui::SameLine();
@@ -2484,6 +2547,7 @@ void DrawUi( HWND hwnd )
 	if( !target && !instances.empty() )
 	{
 		g_ui->target = instances.back();
+		SetFocusedInstance( instances.back() );
 		target       = instances.back();
 	}
 	InstanceSnapshot snap = Snapshot( target );
@@ -2499,7 +2563,10 @@ void DrawUi( HWND hwnd )
 			InstanceSnapshot s = Snapshot( inst );
 			std::string label  = "#" + std::to_string( s.id ) + "  " + ( s.current ? s.current->title : "" );
 			if( ImGui::Selectable( label.c_str(), inst == target ) )
+			{
 				g_ui->target = inst;
+				SetFocusedInstance( inst );
+			}
 		}
 		ImGui::EndCombo();
 	}
@@ -2710,7 +2777,10 @@ void PanelThread()
 			{
 				g_openRequested = false;
 				if( auto t = g_requestedTarget.lock() )
+				{
 					ui.target = t;
+					SetFocusedInstance( t );
+				}
 				BringToFront( hwnd );
 			}
 		}

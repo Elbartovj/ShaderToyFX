@@ -27,7 +27,11 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
+          New-Item -ItemType Directory -Force dist, mcpb/server | Out-Null
+          Copy-Item build/Release/ShaderLoaderMCP.exe mcpb/server/
+          Copy-Item tools/mcp/manifest.json mcpb/
+          Compress-Archive -Path mcpb/* -DestinationPath ShaderLoader-ClaudeDesktop.zip
+          Move-Item ShaderLoader-ClaudeDesktop.zip "dist/Shader Loader pour Claude Desktop.mcpb"
           Copy-Item build/Release/ShaderLoader.dll, build/Release/ShaderLoader_Source.dll, README.md, bookmarklet.txt, bookmarklet-universel.txt, "Installer le favori Shader Loader.html", LICENSE dist/
           Compress-Archive -Path dist/* -DestinationPath ShaderLoader-win64.zip
 

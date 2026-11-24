@@ -146,7 +146,51 @@ ShaderToyFX::ShaderToyFX()
 		values[ PT_USER0 + i ] = 0.5f;
 
 	shared = std::make_shared< InstanceShared >();
+#ifdef STFX_SOURCE
+	shared->moduleKind = "source";
+#else
+	shared->moduleKind = "effect";
+#endif
 	RefreshRandomSources( true, false );
+}
+
+// Pont Claude Desktop : copie de l'image rendue (réduite à 640 px de large au plus)
+void ShaderToyFX::CaptureIfRequested( GLuint hostFbo, int x, int y, int w, int h )
+{
+	{
+		std::lock_guard< std::mutex > lock( shared->m );
+		if( !shared->captureRequested )
+			return;
+	}
+	if( w <= 0 || h <= 0 )
+		return;
+	std::vector< uint8_t > px( (size_t)w * h * 4 );
+	GLint prevRead = 0, prevAlign = 4;
+	glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+	glGetIntegerv( GL_PACK_ALIGNMENT, &prevAlign );
+	glBindFramebuffer( GL_READ_FRAMEBUFFER, hostFbo );
+	glPixelStorei( GL_PACK_ALIGNMENT, 1 );
+	glReadPixels( x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px.data() );
+	glPixelStorei( GL_PACK_ALIGNMENT, prevAlign );
+	glBindFramebuffer( GL_READ_FRAMEBUFFER, (GLuint)prevRead );
+	int ow = std::min( w, 640 ), oh = std::max( 1, (int)( (int64_t)h * ow / w ) );
+	std::vector< uint8_t > out( (size_t)ow * oh * 4 );
+	for( int oy = 0; oy < oh; ++oy )
+	{
+		int sy = h - 1 - (int)( (int64_t)oy * h / oh );// OpenGL : de bas en haut
+		for( int ox = 0; ox < ow; ++ox )
+		{
+			int sx = (int)( (int64_t)ox * w / ow );
+			memcpy( &out[ ( (size_t)oy * ow + ox ) * 4 ], &px[ ( (size_t)sy * w + sx ) * 4 ], 4 );
+			out[ ( (size_t)oy * ow + ox ) * 4 + 3 ] = 255;
+		}
+	}
+	std::lock_guard< std::mutex > lock( shared->m );
+	shared->captureRequested = false;
+	shared->captureRgba      = std::move( out );
+	shared->captureW         = ow;
+	shared->captureH         = oh;
+	shared->captureSerial++;
 }
 
 void ShaderToyFX::RequestChannelImage( int ch, const std::string& path )
@@ -481,6 +525,7 @@ void ShaderToyFX::ApplyPending()
 	{
 		std::lock_guard< std::mutex > lock( shared->m );
 		shared->busy = false;
+		shared->buildSerial++;
 		if( ok )
 		{
 			shared->current = std::shared_ptr< const ShaderDoc >( doc.release() );
@@ -625,6 +670,7 @@ FFResult ShaderToyFX::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	in.modelFit       = values[ PT_MODEL_FIT ] > 0.5f;
 	renderer.Render( in );
 	++frame;
+	CaptureIfRequested( in.hostFbo, in.vpX, in.vpY, in.width, in.height );
 	return FF_SUCCESS;
 }
 

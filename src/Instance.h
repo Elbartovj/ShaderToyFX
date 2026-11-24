@@ -29,6 +29,14 @@ struct InstanceShared
 	bool lastBuildOk = true;
 	std::shared_ptr< const ShaderDoc > current;
 	uint64_t docVersion = 0;
+	uint64_t buildSerial = 0;// +1 à chaque compilation terminée (réussie ou non)
+
+	// capture de l'image rendue (pont Claude Desktop) : demandée par captureRequested, faite par le thread de rendu
+	bool captureRequested = false;
+	std::vector< uint8_t > captureRgba;// lignes de haut en bas
+	int captureW = 0, captureH = 0;
+	uint64_t captureSerial = 0;
+	std::string moduleKind;// "effect" ou "source"
 };
 using SharedPtr = std::shared_ptr< InstanceShared >;
 
@@ -60,4 +68,7 @@ void PinModuleForThreads();
 void RegisterInstance( const SharedPtr& s );
 void UnregisterInstance( const SharedPtr& s );
 std::vector< SharedPtr > ListInstances();
+// instance ciblée par le panneau (pour le pont Claude Desktop)
+void SetFocusedInstance( const SharedPtr& s );
+SharedPtr FocusedInstance();
 }//namespace stfx
