@@ -36,11 +36,13 @@ target_link_libraries(imgui PUBLIC d3d11 dxgi d3dcompiler dwmapi imm32 gdi32 use
 # ---- Projets SHADERed : glslang (GLSL/HLSL -> SPIR-V), SPIRV-Cross (SPIR-V -> GLSL), pugixml, miniz, glm
 # Téléchargés à la configuration (FetchContent). Pour une compilation hors ligne, pointer
 # FETCHCONTENT_SOURCE_DIR_<NOM> vers des copies locales.
+# dépendances anciennes (cmake_minimum_required < 3.5) : acceptées par CMake 4
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 include(FetchContent)
 set(FETCHCONTENT_QUIET ON)
 FetchContent_Declare(glslang GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git GIT_TAG 16.6.0 GIT_SHALLOW ON)
 FetchContent_Declare(spirv_cross GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Cross.git GIT_TAG vulkan-sdk-1.4.363.0 GIT_SHALLOW ON)
-FetchContent_Declare(pugixml GIT_REPOSITORY https://github.com/zeux/pugixml.git GIT_TAG v1.9 GIT_SHALLOW ON)
+FetchContent_Declare(pugixml GIT_REPOSITORY https://github.com/zeux/pugixml.git GIT_TAG v1.15 GIT_SHALLOW ON)
 FetchContent_Declare(miniz GIT_REPOSITORY https://github.com/richgel999/miniz.git GIT_TAG 3.1.0 GIT_SHALLOW ON)
 FetchContent_Declare(glm GIT_REPOSITORY https://github.com/g-truc/glm.git GIT_TAG 1.0.2 GIT_SHALLOW ON)
 
