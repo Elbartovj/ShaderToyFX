@@ -18,5 +18,9 @@ struct HttpResult
 // GET synchrone (à appeler depuis un thread de travail, jamais depuis le thread de rendu)
 HttpResult HttpGet( const std::string& url, int timeoutMs = 15000 );
 
+// Requête quelconque (POST JSON…). headers : lignes « Nom: valeur\r\n ».
+HttpResult HttpRequest( const std::string& method, const std::string& url, const std::string& body, const std::string& headers,
+						int timeoutMs = 15000 );
+
 std::string UrlEncode( const std::string& s );
 }//namespace stfx

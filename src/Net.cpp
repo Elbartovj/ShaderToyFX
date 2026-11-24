@@ -50,7 +50,9 @@ std::string LastErr( const char* what )
 }
 }//namespace
 
-HttpResult HttpGet( const std::string& url, int timeoutMs )
+HttpResult HttpGet( const std::string& url, int timeoutMs ) { return HttpRequest( "GET", url, "", "Accept: */*\r\n", timeoutMs ); }
+
+HttpResult HttpRequest( const std::string& method, const std::string& url, const std::string& body, const std::string& headersIn, int timeoutMs )
 {
 	HttpResult res;
 	std::wstring wurl = Widen( url );
@@ -73,9 +75,9 @@ HttpResult HttpGet( const std::string& url, int timeoutMs )
 	}
 	std::wstring object = std::wstring( path, uc.dwUrlPathLength ) + std::wstring( extra, uc.dwExtraInfoLength );
 
-	HInternet session( WinHttpOpen( L"ShaderToyFX/1.0 (Resolume FFGL)", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0 ) );
+	HInternet session( WinHttpOpen( L"ShaderLoader/1.19 (Resolume FFGL plugin)", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0 ) );
 	if( !session )
-		session.h = WinHttpOpen( L"ShaderToyFX/1.0 (Resolume FFGL)", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0 );
+		session.h = WinHttpOpen( L"ShaderLoader/1.19 (Resolume FFGL plugin)", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0 );
 	if( !session )
 	{
 		res.error = LastErr( "WinHttpOpen" );
@@ -94,14 +96,16 @@ HttpResult HttpGet( const std::string& url, int timeoutMs )
 		return res;
 	}
 	DWORD flags = ( uc.nScheme == INTERNET_SCHEME_HTTPS ) ? WINHTTP_FLAG_SECURE : 0;
-	HInternet request( WinHttpOpenRequest( connect, L"GET", object.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags ) );
+	HInternet request( WinHttpOpenRequest( connect, Widen( method ).c_str(), object.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags ) );
 	if( !request )
 	{
 		res.error = LastErr( "WinHttpOpenRequest" );
 		return res;
 	}
-	const wchar_t* headers = L"Accept: */*\r\n";
-	if( !WinHttpSendRequest( request, headers, (DWORD)-1L, WINHTTP_NO_REQUEST_DATA, 0, 0, 0 ) || !WinHttpReceiveResponse( request, nullptr ) )
+	std::wstring headers = Widen( headersIn.empty() ? std::string( "Accept: */*\r\n" ) : headersIn );
+	if( !WinHttpSendRequest( request, headers.c_str(), (DWORD)-1L, body.empty() ? WINHTTP_NO_REQUEST_DATA : (LPVOID)body.data(), (DWORD)body.size(),
+							 (DWORD)body.size(), 0 ) ||
+		!WinHttpReceiveResponse( request, nullptr ) )
 	{
 		res.error = LastErr( "Connexion impossible" );
 		return res;
@@ -136,7 +140,8 @@ HttpResult HttpGet( const std::string& url, int timeoutMs )
 	return res;
 }
 #else
-HttpResult HttpGet( const std::string& url, int )
+HttpResult HttpGet( const std::string& url, int timeoutMs ) { return HttpRequest( "GET", url, "", "", timeoutMs ); }
+HttpResult HttpRequest( const std::string&, const std::string&, const std::string&, const std::string&, int )
 {
 	HttpResult r;
 	r.error = "HTTP non supporté sur cette plateforme";

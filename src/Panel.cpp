@@ -195,29 +195,65 @@ std::map< std::string, Thumb > g_thumbs;
 std::mutex g_thumbMutex;
 std::deque< DecodedThumb > g_thumbQueue;
 
-void RequestThumb( const std::string& id )
+// Décodage base64 d'une URL data:
+bool DecodeDataUrlBytes( const std::string& u, std::vector< uint8_t >& out )
 {
-	Thumb& t = g_thumbs[ id ];
+	size_t comma = u.find( ',' );
+	if( u.rfind( "data:", 0 ) != 0 || comma == std::string::npos )
+		return false;
+	static const std::string b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	int val = 0, bits = -8;
+	for( size_t i = comma + 1; i < u.size(); ++i )
+	{
+		size_t c = b64.find( u[ i ] );
+		if( c == std::string::npos )
+			continue;
+		val = ( ( val << 6 ) + (int)c ) & 0xFFFFFF;
+		bits += 6;
+		if( bits >= 0 )
+		{
+			out.push_back( uint8_t( ( val >> bits ) & 0xFF ) );
+			bits -= 8;
+		}
+	}
+	return !out.empty();
+}
+
+// key : identifiant de la miniature ; url : vide = miniature Shadertoy de l'id, sinon https://… ou data:image/…
+void RequestThumb( const std::string& key, const std::string& url = "" )
+{
+	Thumb& t = g_thumbs[ key ];
 	if( t.requested )
 		return;
 	t.requested = true;
-	std::thread( [ id ] {
-		std::string local = JoinPath( MediaDir(), "thumb_" + id + ".jpg" );
+	std::thread( [ key, url ] {
 		std::vector< uint8_t > bytes;
-		if( !ReadFileBytes( local, bytes ) || bytes.empty() )
+		if( url.rfind( "data:", 0 ) == 0 )
+			DecodeDataUrlBytes( url, bytes );
+		else
 		{
-			HttpResult r = HttpGet( "https://www.shadertoy.com/media/shaders/" + id + ".jpg" );
-			if( !r.Ok() )
-				return;
-			bytes = std::move( r.body );
-			WriteFileBytes( local, bytes.data(), bytes.size() );
+			uint32_t h = 2166136261u;
+			for( unsigned char c : url )
+				h = ( h ^ c ) * 16777619u;
+			char hb[ 16 ];
+			snprintf( hb, sizeof( hb ), "%08x", h );
+			std::string local = JoinPath( MediaDir(), url.empty() ? "thumb_" + key + ".jpg" : std::string( "thumbw_" ) + hb + ".img" );
+			if( !ReadFileBytes( local, bytes ) || bytes.empty() )
+			{
+				HttpResult r = HttpGet( url.empty() ? "https://www.shadertoy.com/media/shaders/" + key + ".jpg" : url );
+				if( !r.Ok() )
+					return;
+				bytes = std::move( r.body );
+				MakeDirs( MediaDir() );
+				WriteFileBytes( local, bytes.data(), bytes.size() );
+			}
 		}
 		int w, h, n;
-		unsigned char* px = stbi_load_from_memory( bytes.data(), (int)bytes.size(), &w, &h, &n, 4 );
+		unsigned char* px = bytes.empty() ? nullptr : stbi_load_from_memory( bytes.data(), (int)bytes.size(), &w, &h, &n, 4 );
 		if( !px )
 			return;
 		DecodedThumb d;
-		d.id = id;
+		d.id = key;
 		d.w  = w;
 		d.h  = h;
 		d.rgba.assign( px, px + (size_t)w * h * 4 );
@@ -601,9 +637,9 @@ void HelpMarker( const char* text )
 	}
 }
 
-void DrawThumb( const std::string& id, float maxW )
+void DrawThumb( const std::string& id, float maxW, const std::string& url = "" )
 {
-	RequestThumb( id );
+	RequestThumb( id, url );
 	Thumb& t = g_thumbs[ id ];
 	float h  = maxW * 9.0f / 16.0f;
 	if( t.srv && t.w > 0 )
@@ -613,6 +649,322 @@ void DrawThumb( const std::string& id, float maxW )
 	}
 	else
 		ImGui::Dummy( ImVec2( maxW, h ) );
+}
+
+// Tri demandé par un clic sur l'en-tête du tableau en cours : colonne et sens. false = ordre d'origine.
+bool TableSortRequest( int& col, bool& asc )
+{
+	ImGuiTableSortSpecs* sp = ImGui::TableGetSortSpecs();
+	if( !sp || sp->SpecsCount < 1 )
+		return false;
+	col = sp->Specs[ 0 ].ColumnIndex;
+	asc = sp->Specs[ 0 ].SortDirection != ImGuiSortDirection_Descending;
+	sp->SpecsDirty = false;
+	return true;
+}
+
+// comparaison « naturelle » sans casse : « shader 2 » avant « shader 10 »
+int NaturalCompare( const std::string& a, const std::string& b )
+{
+	size_t i = 0, j = 0;
+	while( i < a.size() && j < b.size() )
+	{
+		unsigned char ca = (unsigned char)a[ i ], cb = (unsigned char)b[ j ];
+		if( isdigit( ca ) && isdigit( cb ) )
+		{
+			size_t i2 = i, j2 = j;
+			while( i2 < a.size() && isdigit( (unsigned char)a[ i2 ] ) ) ++i2;
+			while( j2 < b.size() && isdigit( (unsigned char)b[ j2 ] ) ) ++j2;
+			std::string na = a.substr( i, i2 - i ), nb = b.substr( j, j2 - j );
+			na.erase( 0, std::min( na.find_first_not_of( '0' ), na.size() - 1 ) );
+			nb.erase( 0, std::min( nb.find_first_not_of( '0' ), nb.size() - 1 ) );
+			if( na.size() != nb.size() )
+				return na.size() < nb.size() ? -1 : 1;
+			if( na != nb )
+				return na < nb ? -1 : 1;
+			i = i2;
+			j = j2;
+			continue;
+		}
+		ca = (unsigned char)tolower( ca );
+		cb = (unsigned char)tolower( cb );
+		if( ca != cb )
+			return ca < cb ? -1 : 1;
+		++i;
+		++j;
+	}
+	return ( a.size() - i ) == ( b.size() - j ) ? 0 : ( ( a.size() - i ) < ( b.size() - j ) ? -1 : 1 );
+}
+
+//------------------------------------------------------------------ autres sites : téléchargement direct et recherche
+struct WebJobResult
+{
+	bool ok = false;
+	std::string path, title, err, label;
+};
+std::mutex g_webJobMutex;
+std::deque< WebJobResult > g_webJobDone;
+std::atomic< int > g_webJobsRunning{ 0 };
+
+void StartWebImport( const std::string& site, const std::string& id, const std::string& label )
+{
+	if( site == "shadered" )
+	{
+		if( SharedPtr t = Target() )
+		{
+			RequestLoadShadered( t, id );
+			g_ui->localDirty = true;
+			Toast( "Téléchargement SHADERed " + id + "…" );
+		}
+		else
+			Toast( "Aucune instance Shader Loader active." );
+		return;
+	}
+	++g_webJobsRunning;
+	Toast( "Téléchargement : " + label + "…" );
+	std::thread( [ site, id, label ] {
+		WebJobResult r;
+		r.label = label;
+		r.ok    = sites::FetchAndImport( site, id, r.path, r.title, r.err );
+		{
+			std::lock_guard< std::mutex > lock( g_webJobMutex );
+			g_webJobDone.push_back( r );
+		}
+		--g_webJobsRunning;
+		if( HWND hwnd = g_hwnd.load() )
+			PostMessageW( hwnd, WM_STFX_WAKE, 0, 0 );
+	} ).detach();
+}
+
+void PollWebJobs()
+{
+	std::deque< WebJobResult > done;
+	{
+		std::lock_guard< std::mutex > lock( g_webJobMutex );
+		done.swap( g_webJobDone );
+	}
+	for( auto& r : done )
+	{
+		if( !r.ok )
+		{
+			Toast( "Import impossible (" + r.label + ") : " + r.err );
+			continue;
+		}
+		g_ui->localDirty = true;
+		if( Target() )
+			LoadPath( r.path );
+		else
+			Toast( "Importé : " + r.title );
+	}
+}
+
+struct WebBrowseState
+{
+	std::mutex m;
+	uint64_t gen = 0;
+	bool running = false;
+	std::string error, next;
+	std::vector< sites::WebEntry > entries;
+};
+WebBrowseState g_webBrowse;
+
+struct WebUi
+{
+	int site    = 0;
+	int sortIdx = 0;
+	std::string query;
+	std::vector< std::string > cursors{ "" };// curseur de chaque page visitée
+	int page = 0;
+	std::string selected;
+	bool searched = false;
+};
+WebUi g_webUi;
+
+void StartWebBrowse()
+{
+	const auto& ws    = sites::WebSites()[ g_webUi.site ];
+	std::string site  = ws.key, query = g_webUi.query, cursor = g_webUi.cursors[ g_webUi.page ];
+	int sortIdx       = g_webUi.sortIdx;
+	g_webUi.searched  = true;
+	uint64_t gen;
+	{
+		std::lock_guard< std::mutex > lock( g_webBrowse.m );
+		gen                 = ++g_webBrowse.gen;
+		g_webBrowse.running = true;
+		g_webBrowse.error.clear();
+		g_webBrowse.entries.clear();
+		g_webBrowse.next.clear();
+	}
+	std::thread( [ = ] {
+		std::vector< sites::WebEntry > out;
+		std::string next, err;
+		bool ok = sites::Browse( site, query, sortIdx, cursor, out, next, err );
+		std::lock_guard< std::mutex > lock( g_webBrowse.m );
+		if( gen != g_webBrowse.gen )
+			return;
+		g_webBrowse.running = false;
+		g_webBrowse.entries = out;
+		g_webBrowse.next    = next;
+		g_webBrowse.error   = !ok ? err : ( out.empty() ? std::string( "Aucun résultat." ) : std::string() );
+		if( HWND hwnd = g_hwnd.load() )
+			PostMessageW( hwnd, WM_STFX_WAKE, 0, 0 );
+	} ).detach();
+}
+
+void TabSites()
+{
+	const auto& list = sites::WebSites();
+	const auto& ws   = list[ g_webUi.site ];
+	ImGui::SetNextItemWidth( ImGui::GetFontSize() * 8 );
+	bool changed = false;
+	if( ImGui::BeginCombo( "##site", ws.name ) )
+	{
+		for( int i = 0; i < (int)list.size(); ++i )
+			if( ImGui::Selectable( list[ i ].name, i == g_webUi.site ) && i != g_webUi.site )
+			{
+				g_webUi.site    = i;
+				g_webUi.sortIdx = 0;
+				changed         = true;
+			}
+		ImGui::EndCombo();
+	}
+	const auto& cur = list[ g_webUi.site ];
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth( -ImGui::GetFontSize() * 21 );
+	bool enter = ImGui::InputTextWithHint( "##wq", cur.searchHint, &g_webUi.query, ImGuiInputTextFlags_EnterReturnsTrue );
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth( ImGui::GetFontSize() * 7 );
+	if( ImGui::BeginCombo( "##wsort", cur.sortLabels[ std::min( (size_t)g_webUi.sortIdx, cur.sortLabels.size() - 1 ) ] ) )
+	{
+		for( int i = 0; i < (int)cur.sortLabels.size(); ++i )
+			if( ImGui::Selectable( cur.sortLabels[ i ], i == g_webUi.sortIdx ) && i != g_webUi.sortIdx )
+			{
+				g_webUi.sortIdx = i;
+				changed         = true;
+			}
+		ImGui::EndCombo();
+	}
+	ImGui::SameLine();
+	if( ImGui::Button( "Rechercher" ) || enter || changed )
+	{
+		g_webUi.cursors = { "" };
+		g_webUi.page    = 0;
+		g_webUi.selected.clear();
+		StartWebBrowse();
+	}
+	ImGui::SameLine();
+	if( ImGui::Button( "Ouvrir le site" ) )
+		OpenUrl( cur.home );
+
+	std::vector< sites::WebEntry > entries;
+	std::string error, next;
+	bool running;
+	{
+		std::lock_guard< std::mutex > lock( g_webBrowse.m );
+		entries = g_webBrowse.entries;
+		error   = g_webBrowse.error;
+		next    = g_webBrowse.next;
+		running = g_webBrowse.running;
+	}
+
+	float avail  = ImGui::GetContentRegionAvail().x;
+	float footer = ImGui::GetFrameHeightWithSpacing() + 4;
+	ImGui::BeginChild( "wres", ImVec2( avail * 0.55f, -footer ) );
+	if( !error.empty() )
+		ImGui::TextColored( ImVec4( 1, 0.4f, 0.4f, 1 ), "%s", error.c_str() );
+	else if( !g_webUi.searched )
+		ImGui::TextDisabled( "Choisis un site et clique Rechercher (vide = parcourir). Double-clic pour charger." );
+	else if( running )
+		ImGui::TextDisabled( "Chargement…" );
+	ImGuiTableFlags tf = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable |
+						 ImGuiTableFlags_Sortable | ImGuiTableFlags_SortTristate;
+	if( ImGui::BeginTable( "wtbl", 3, tf ) )
+	{
+		ImGui::TableSetupScrollFreeze( 0, 1 );
+		ImGui::TableSetupColumn( "TITRE", ImGuiTableColumnFlags_WidthStretch );
+		ImGui::TableSetupColumn( "AUTEUR", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 7 );
+		ImGui::TableSetupColumn( "INFOS", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 8 );
+		ImGui::TableHeadersRow();
+		int sc;
+		bool asc;
+		if( TableSortRequest( sc, asc ) )
+			std::stable_sort( entries.begin(), entries.end(), [ & ]( const sites::WebEntry& a, const sites::WebEntry& b ) {
+				const std::string& x = sc == 0 ? a.title : sc == 1 ? a.author : a.info;
+				const std::string& y = sc == 0 ? b.title : sc == 1 ? b.author : b.info;
+				int c                = NaturalCompare( x, y );
+				return asc ? c < 0 : c > 0;
+			} );
+		for( auto& e : entries )
+		{
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+			ImGui::PushID( e.id.c_str() );
+			std::string label = e.title.empty() ? e.id : e.title;
+			if( ImGui::Selectable( label.c_str(), g_webUi.selected == e.id, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick ) )
+			{
+				g_webUi.selected = e.id;
+				if( ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
+					StartWebImport( cur.key, e.id, label );
+			}
+			ImGui::TableNextColumn();
+			ImGui::TextUnformatted( e.author.c_str() );
+			ImGui::TableNextColumn();
+			ImGui::TextUnformatted( e.info.c_str() );
+			ImGui::PopID();
+		}
+		ImGui::EndTable();
+	}
+	ImGui::EndChild();
+
+	ImGui::SameLine();
+	ImGui::BeginChild( "wdetail", ImVec2( 0, -footer ), ImGuiChildFlags_Borders );
+	const sites::WebEntry* sel = nullptr;
+	for( auto& e : entries )
+		if( e.id == g_webUi.selected )
+			sel = &e;
+	if( sel )
+	{
+		if( !sel->thumb.empty() )
+			DrawThumb( std::string( cur.key ) + ":" + sel->id, std::min( ImGui::GetContentRegionAvail().x, ImGui::GetFontSize() * 18 ), sel->thumb );
+		ImGui::TextWrapped( "%s", sel->title.c_str() );
+		ImGui::TextDisabled( "par %s  ·  id %s", sel->author.c_str(), sel->id.c_str() );
+		if( !sel->info.empty() )
+			ImGui::TextWrapped( "%s", sel->info.c_str() );
+		if( ImGui::Button( "Charger le shader" ) )
+			StartWebImport( cur.key, sel->id, sel->title );
+		ImGui::SameLine();
+		if( ImGui::Button( "Voir sur le site" ) )
+			OpenUrl( sites::SiteShaderUrl( cur.key, sel->id ) );
+		ImGui::Spacing();
+		ImGui::TextDisabled( "Le shader est converti et rangé dans Documents\\ShaderToyFX\\%s.", cur.name );
+		if( std::string( cur.key ) == "neort" )
+			ImGui::TextDisabled( "Seules les œuvres GLSL sont listées (pas JavaScript / p5 / three.js)." );
+	}
+	else
+		ImGui::TextDisabled( "Sélectionne un shader." );
+	ImGui::EndChild();
+
+	ImGui::BeginDisabled( g_webUi.page <= 0 || running );
+	if( ImGui::Button( "< Préc.##w" ) )
+	{
+		--g_webUi.page;
+		StartWebBrowse();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::Text( "Page %d", g_webUi.page + 1 );
+	ImGui::SameLine();
+	ImGui::BeginDisabled( next.empty() || running );
+	if( ImGui::Button( "Suiv. >##w" ) )
+	{
+		g_webUi.cursors.resize( g_webUi.page + 1 );
+		g_webUi.cursors.push_back( next );
+		++g_webUi.page;
+		StartWebBrowse();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::TextDisabled( "%zu shaders%s%s", entries.size(), running ? "  · chargement…" : "", g_webJobsRunning.load() ? "  · téléchargement en cours…" : "" );
 }
 
 //------------------------------------------------------------------ onglet SHADERTOY
@@ -685,16 +1037,37 @@ void TabShadertoy( HWND )
 		ImGui::TextDisabled( "Sans clé, la recherche s'ouvre dans ton navigateur. Aléatoire pioche dans tes shaders locaux." );
 	else if( !g_ui->searchedOnce )
 		ImGui::TextDisabled( "Lance une recherche, ou laisse vide pour parcourir tout Shadertoy." );
-	ImGuiTableFlags tf = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable;
+	ImGuiTableFlags tf = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable |
+						 ImGuiTableFlags_Sortable | ImGuiTableFlags_SortTristate;
 	if( ImGui::BeginTable( "tbl", 5, tf ) )
 	{
 		ImGui::TableSetupScrollFreeze( 0, 1 );
 		ImGui::TableSetupColumn( "TITRE", ImGuiTableColumnFlags_WidthStretch );
 		ImGui::TableSetupColumn( "AUTEUR", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 7 );
-		ImGui::TableSetupColumn( "VUES", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 4 );
-		ImGui::TableSetupColumn( "LIKES", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 3 );
-		ImGui::TableSetupColumn( "PASSES", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 3 );
+		ImGui::TableSetupColumn( "VUES", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_PreferSortDescending, ImGui::GetFontSize() * 4 );
+		ImGui::TableSetupColumn( "LIKES", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_PreferSortDescending, ImGui::GetFontSize() * 3 );
+		ImGui::TableSetupColumn( "PASSES", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_PreferSortDescending, ImGui::GetFontSize() * 3 );
 		ImGui::TableHeadersRow();
+		int sc;
+		bool asc;
+		if( TableSortRequest( sc, asc ) )
+			std::stable_sort( ids.begin(), ids.end(), [ & ]( const std::string& a, const std::string& b ) {
+				auto ia = info.find( a ), ib = info.find( b );
+				ShaderSummary* x = ia != info.end() ? ia->second.get() : nullptr;
+				ShaderSummary* y = ib != info.end() ? ib->second.get() : nullptr;
+				if( !x || !y )
+					return x != nullptr && y == nullptr;// pas encore chargés : à la fin
+				int c = 0;
+				switch( sc )
+				{
+				case 0: c = NaturalCompare( x->name, y->name ); break;
+				case 1: c = NaturalCompare( x->author, y->author ); break;
+				case 2: c = x->views < y->views ? -1 : x->views > y->views; break;
+				case 3: c = x->likes < y->likes ? -1 : x->likes > y->likes; break;
+				default: c = x->passes < y->passes ? -1 : x->passes > y->passes; break;
+				}
+				return asc ? c < 0 : c > 0;
+			} );
 		for( auto& id : ids )
 		{
 			ImGui::TableNextRow();
@@ -781,8 +1154,8 @@ void TabShadertoy( HWND )
 //------------------------------------------------------------------ onglet LIEN
 void TabLink()
 {
-	ImGui::TextWrapped( "Colle un lien Shadertoy (https://www.shadertoy.com/view/XXXXXX), un id à 6 caractères, "
-						"ou un lien SHADERed (https://shadered.org/view?s=XXXXXXXXXX)." );
+	ImGui::TextWrapped( "Colle un lien Shadertoy (https://www.shadertoy.com/view/XXXXXX) ou un id à 6 caractères, "
+						"ou un lien SHADERed, ShaderKit, FragCoord, Shaderoo ou NEORT." );
 	ImGui::Spacing();
 	ImGui::SetNextItemWidth( -ImGui::GetFontSize() * 12 );
 	bool enter = ImGui::InputTextWithHint( "##link", "https://www.shadertoy.com/view/…", &g_ui->link, ImGuiInputTextFlags_EnterReturnsTrue );
@@ -810,15 +1183,20 @@ void TabLink()
 		ShaderedBookmarkletHelp();
 		return;
 	}
-	// autres sites : import par le favori universel depuis la page du shader
+	// autres sites : téléchargement direct (le favori universel reste possible depuis la page)
 	{
-		static const std::regex reSite( R"((shaderkit\.com/s/|fragcoord\.xyz/s/|shaderoo\.org/.*shader=|neort\.io/(?:\w+/)?art/))", std::regex::icase );
-		if( std::regex_search( g_ui->link, reSite ) )
+		std::string site, wid;
+		if( sites::ParseSiteLink( g_ui->link, site, wid ) )
 		{
+			if( ImGui::Button( "Charger" ) || enter )
+				StartWebImport( site, wid, wid );
+			ImGui::SameLine();
 			if( ImGui::Button( "Ouvrir la page" ) )
-				OpenUrl( Trim( g_ui->link ) );
-			ImGui::TextWrapped( "Ce site ne permet pas le téléchargement direct : ouvre la page puis clique ton favori universel. "
-								"Le shader arrive tout seul dans Shader Loader." );
+				OpenUrl( sites::SiteShaderUrl( site, wid ) );
+			ImGui::TextDisabled( "%s : %s", site.c_str(), wid.c_str() );
+			ImGui::Spacing();
+			ImGui::TextWrapped( "Le shader est téléchargé directement, converti et chargé. Si le site refuse l'accès direct, "
+								"ouvre la page et clique ton favori universel." );
 			ImGui::Spacing();
 			ShaderedBookmarkletHelp();
 			return;
@@ -1343,7 +1721,9 @@ void TabLocal()
 
 	auto& sel = g_ui->localSel;
 	float previewPaneW = std::max( ImGui::GetFontSize() * 17.0f, 270.0f );
-	bool tableOpen     = ImGui::BeginTable( "local", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable,
+	bool tableOpen     = ImGui::BeginTable( "local", 5,
+											ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable |
+												ImGuiTableFlags_Sortable,
 										ImVec2( -( previewPaneW + ImGui::GetStyle().ItemSpacing.x ), -footer ) );
 	if( tableOpen )
 	{
@@ -1354,12 +1734,40 @@ void TabLocal()
 				sel.insert( files[ i ].path );
 
 		ImGui::TableSetupScrollFreeze( 0, 1 );
-		ImGui::TableSetupColumn( "", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoResize, ImGui::GetTextLineHeight() );
-		ImGui::TableSetupColumn( "NOM", ImGuiTableColumnFlags_WidthStretch );
+		ImGui::TableSetupColumn( "", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoResize | ImGuiTableColumnFlags_PreferSortDescending,
+								 ImGui::GetTextLineHeight() );
+		ImGui::TableSetupColumn( "NOM", ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_DefaultSort );
 		ImGui::TableSetupColumn( "LICENCE", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 12 );
 		ImGui::TableSetupColumn( "AUTEUR", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 7 );
 		ImGui::TableSetupColumn( "DOSSIER", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 8 );
 		ImGui::TableHeadersRow();
+		int sc;
+		bool asc;
+		if( TableSortRequest( sc, asc ) )
+		{
+			std::map< std::string, bool > fav;
+			if( sc == 0 )
+				for( size_t i : visible )
+					fav[ files[ i ].path ] = IsFavorite( files[ i ].path );
+			std::stable_sort( visible.begin(), visible.end(), [ & ]( size_t a, size_t b ) {
+				int c = 0;
+				switch( sc )
+				{
+				case 0: c = (int)fav[ files[ a ].path ] - (int)fav[ files[ b ].path ]; break;
+				case 2:
+					c = (int)LicenseAllowsCommercial( lics[ a ].kind ) - (int)LicenseAllowsCommercial( lics[ b ].kind );
+					if( c == 0 )
+						c = NaturalCompare( lics[ a ].label, lics[ b ].label );
+					break;
+				case 3: c = NaturalCompare( lics[ a ].author, lics[ b ].author ); break;
+				case 4: c = NaturalCompare( files[ a ].relFolder, files[ b ].relFolder ); break;
+				default: break;
+				}
+				if( c == 0 )
+					c = NaturalCompare( files[ a ].name, files[ b ].name );
+				return asc ? c < 0 : c > 0;
+			} );
+		}
 		for( size_t vi = 0; vi < visible.size(); ++vi )
 		{
 			const LocalEntry& e   = files[ visible[ vi ] ];
@@ -1767,6 +2175,7 @@ void DrawUi( HWND hwnd )
 	ImGui::SetNextWindowSize( vp->WorkSize );
 	ImGuiWindowFlags wf = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
 	ImGui::Begin( "##main", nullptr, wf );
+	PollWebJobs();
 
 	// cible
 	auto instances     = ListInstances();
@@ -1818,9 +2227,9 @@ void DrawUi( HWND hwnd )
 	ImGui::BeginChild( "tabs", ImVec2( 0, -logH ) );
 	if( ImGui::BeginTabBar( "main" ) )
 	{
-		const char* names[] = { "SHADERTOY", "LIEN", "FICHIER", "LOCAL", "PRÉFÉRENCES", "ÉDITEUR" };
-		int order[]         = { 0, 1, 2, 3, 5, 4 };// affichage : … LOCAL, ÉDITEUR, PRÉFÉRENCES
-		for( int k = 0; k < 6; ++k )
+		const char* names[] = { "SHADERTOY", "LIEN", "FICHIER", "LOCAL", "PRÉFÉRENCES", "ÉDITEUR", "AUTRES SITES" };
+		int order[]         = { 0, 6, 1, 2, 3, 5, 4 };// affichage : SHADERTOY, AUTRES SITES, … LOCAL, ÉDITEUR, PRÉFÉRENCES
+		for( int k = 0; k < 7; ++k )
 		{
 			int i                 = order[ k ];
 			ImGuiTabItemFlags tif = g_ui->forceTab == i ? ImGuiTabItemFlags_SetSelected : 0;
@@ -1835,6 +2244,7 @@ void DrawUi( HWND hwnd )
 				case 3: TabLocal(); break;
 				case 4: TabPrefs(); break;
 				case 5: TabEditor( snap ); break;
+				case 6: TabSites(); break;
 				}
 				ImGui::EndTabItem();
 			}

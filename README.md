@@ -104,6 +104,25 @@ Un shader téléchargé est enregistré en `.json` et c'est ce fichier qui est s
 
 Uniforms disponibles : `iResolution`, `iTime`, `iTimeDelta`, `iFrameRate`, `iFrame`, `iChannelTime[4]`, `iChannelResolution[4]`, `iMouse`, `iDate`, `iSampleRate`, `iChannel0..3`.
 
+## Autres sites sans navigateur : onglet AUTRES SITES et liens directs
+
+Pour ShaderKit, FragCoord, Shaderoo, NEORT et SHADERed, le plugin télécharge le shader lui-même, sans favori ni clé :
+
+- **Onglet AUTRES SITES** : choisis le site, tape une recherche (ou laisse vide pour parcourir), puis double-clique un résultat ou clique **Charger le shader**. Une miniature s'affiche à droite (sauf FragCoord, qui n'en fournit pas).
+- **Onglet LIEN** : colle un lien `shaderkit.com/s/…`, `fragcoord.xyz/s/…`, `shaderoo.org/?shader=…`, `neort.io/art/…` ou `shadered.org/view?s=…`, puis **Charger**.
+
+| Site | Accès utilisé | Recherche |
+|---|---|---|
+| FragCoord | Serveur MCP public du site (lecture sans clé). Les passes en « golf », WGSL, HLSL… sont converties en GLSL par FragCoord | Mots-clés et tags |
+| NEORT | API publique `api.neort.io` | Par tag (vide = tag « glsl ») ; seules les œuvres GLSL sont listées |
+| Shaderoo | Chargement de scène du site (`cmd=loaddb`) et textures intégrées (`rand*`, volumes `car64`, `dragon128`…) | Filtre sur titre et auteur ; tri tendance, récents, vues, likes |
+| ShaderKit | Page publique du shader | Filtre sur titre, auteur et tags |
+| SHADERed | Page de recherche du site, puis téléchargement du projet | Mots-clés ; tri tendance, récents, populaires |
+
+Dans les listes (LOCAL, SHADERTOY, AUTRES SITES), clique sur l'en-tête d'une colonne pour trier ; reclique pour inverser le sens.
+
+Shadertoy reste dans son onglet : recherche avec une clé API, ou favori sans clé. Si un site refuse l'accès direct, ouvre la page et utilise le favori universel ci-dessous.
+
 ## Favori universel : ShaderKit, FragCoord, Shaderoo, NEORT (et Shadertoy, SHADERed)
 
 Un seul favori suffit pour importer depuis six sites. Pas besoin d'extension Firefox : c'est un favori ordinaire, qui marche dans Firefox, Chrome et Edge.
@@ -117,8 +136,8 @@ Un seul favori suffit pour importer depuis six sites. Pas besoin d'extension Fir
 | shadertoy.com | `/view/ID` | Toutes les passes, comme le bookmarklet Shadertoy |
 | shadered.org | `/view?s=ID` | Projet complet (voir plus bas) |
 | shaderkit.com | `/s/ID` | Image et buffers (feedback compris), Common, sliders des uniforms du site avec leurs plages |
-| fragcoord.xyz | `/s/ID` | Export « Shadertoy » du site. `u_audio` devient l'audio Resolume |
-| shaderoo.org | `?shader=ID` | Image, Buff_A..D, includes, textures intégrées et images. Non pris en charge : passes géométrie (`Geom_*`, maillages), tailles de buffer fixes (rendus à la taille de sortie) |
+| fragcoord.xyz | `/s/ID` | Export « Shadertoy » du site. `u_audio` devient l'audio Resolume. Pour les shaders à plusieurs passes, préfère l'onglet LIEN ou AUTRES SITES |
+| shaderoo.org | `?shader=ID` | Image, Buff_A..D, includes, textures intégrées (dont les volumes 3D `car64`, `dragon128`), images en ligne. `#ShaderooNumPasses N` : la passe tourne une fois par image et son résultat se construit sur N images. Non pris en charge : passes géométrie (`Geom_*`, maillages), tailles de buffer fixes (rendus à la taille de sortie) |
 | neort.io | `/art/ID` | Œuvres en GLSL (style GLSLSandbox : `resolution`, `time`, `mouse`, `backbuffer`). Les œuvres en JavaScript, p5.js ou three.js ne sont pas importables |
 
 Les fichiers `.frag` / `.glsl` avec `void main()` (style The Book of Shaders, GLSLSandbox, GLSL ES 3 avec `out vec4`) sont aussi convertis automatiquement quand tu les ouvres dans l'onglet FICHIER.

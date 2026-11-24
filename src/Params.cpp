@@ -463,7 +463,7 @@ void FindCandidates( const std::string& code, std::vector< Candidate >& out )
 				comment = orig[ li ].substr( c + 2 );
 		}
 		std::smatch m;
-		if( std::regex_match( line, m, ReDefine() ) )
+		if( depth == 0 && std::regex_match( line, m, ReDefine() ) )// un #define dans une fonction ne peut pas devenir un uniform
 		{
 			Candidate c;
 			c.name   = m[ 1 ];
@@ -766,6 +766,81 @@ void ExtractUserParams( ShaderDoc& doc )
 	}
 }
 
+// Déclarations multiples sans valeur dans une fonction : « float i, z = 3.0, d; », « for( float i, d; … ) ».
+// WebGL (ANGLE) met les variables locales à zéro ; les pilotes OpenGL non : on ajoute « = type(0) ».
+std::string ZeroInitDeclarators( const std::string& line, int depth0 )
+{
+	static const std::regex reStart( R"((^|[;{}(])(\s*)((?:(?:highp|mediump|lowp)\s+)?)(float|int|uint|vec[234]|ivec[234]|uvec[234]|mat[234])\s+(?=[A-Za-z_]))" );
+	static const std::regex reBlock( R"(\b(struct|uniform|buffer|layout|in|out)\b\s*\w*\s*\{)" );
+	if( std::regex_search( line, reBlock ) || line.find( "struct" ) != std::string::npos )
+		return line;// membres de struct / de bloc : pas d'initialisation possible
+	std::string out;
+	size_t pos = 0;
+	for( std::sregex_iterator it( line.begin(), line.end(), reStart ), end; it != end; ++it )
+	{
+		const std::smatch& m = *it;
+		size_t start         = (size_t)m.position( 0 ) + (size_t)m.length( 0 );
+		if( start < pos )
+			continue;
+		int d0 = depth0;// profondeur d'accolades à cet endroit (fonction ouverte sur la même ligne)
+		for( size_t k = 0; k < (size_t)m.position( 0 ) + 1 && k < line.size(); ++k )
+			d0 += line[ k ] == '{' ? 1 : line[ k ] == '}' ? -1 : 0;
+		if( d0 <= 0 )
+			continue;
+		// liste des déclarateurs jusqu'au « ; » de même niveau
+		int par = 0;
+		size_t i = start, semi = std::string::npos;
+		std::vector< size_t > commas;
+		for( ; i < line.size(); ++i )
+		{
+			char c = line[ i ];
+			if( c == '(' || c == '[' )
+				++par;
+			else if( c == ')' || c == ']' )
+			{
+				if( --par < 0 )
+					break;
+			}
+			else if( c == '{' || c == '}' )
+				break;
+			else if( c == ',' && par == 0 )
+				commas.push_back( i );
+			else if( c == ';' && par == 0 )
+			{
+				semi = i;
+				break;
+			}
+		}
+		if( semi == std::string::npos )
+			continue;
+		std::string type = m[ 4 ];
+		std::string rebuilt;
+		size_t a = start;
+		commas.push_back( semi );
+		bool changed = false;
+		for( size_t k = 0; k < commas.size(); ++k )
+		{
+			std::string d = line.substr( a, commas[ k ] - a );
+			rebuilt += d;
+			std::string t = d;
+			t.erase( 0, t.find_first_not_of( " \t" ) );
+			t.erase( t.find_last_not_of( " \t" ) + 1 );
+			if( std::regex_match( t, std::regex( R"([A-Za-z_]\w*)" ) ) && t != "return" )
+			{
+				rebuilt += " = " + type + "(0)";
+				changed = true;
+			}
+			rebuilt += line[ commas[ k ] ];
+			a = commas[ k ] + 1;
+		}
+		if( !changed )
+			continue;
+		out += line.substr( pos, start - pos ) + rebuilt;
+		pos = semi + 1;
+	}
+	return out + line.substr( pos );
+}
+
 std::string ZeroInitLocals( const std::string& code )
 {
 	static const std::regex reDecl( R"(^(\s*)((?:(?:highp|mediump|lowp)\s+)?)(float|int|uint|bool|vec[234]|ivec[234]|uvec[234]|bvec[234]|mat[234])(\s+)([A-Za-z_]\w*)\s*;)" );
@@ -790,6 +865,9 @@ std::string ZeroInitLocals( const std::string& code )
 			std::string init = m[ 1 ].str() + m[ 2 ].str() + type + m[ 4 ].str() + m[ 5 ].str() + " = " + type + "(0);";
 			result           = init + result.substr( (size_t)m.length( 0 ) );
 		}
+		else if( !inStruct && li < orig.size() && orig[ li ].compare( 0, lines[ li ].size(), lines[ li ] ) == 0 &&
+				 lines[ li ].find_first_not_of( " \t" ) != std::string::npos && lines[ li ][ lines[ li ].find_first_not_of( " \t" ) ] != '#' )
+			result = ZeroInitDeclarators( lines[ li ], depth ) + orig[ li ].substr( lines[ li ].size() );
 		out += result;
 		if( li + 1 < lines.size() )
 			out += '\n';
@@ -878,7 +956,7 @@ std::string ApplyParamRewrites( const std::string& code, const std::vector< User
 		std::string result      = li < orig.size() ? orig[ li ] : line;
 		std::smatch m;
 		std::string name;
-		if( std::regex_match( line, m, ReDefine() ) )
+		if( depth == 0 && std::regex_match( line, m, ReDefine() ) )
 			name = m[ 1 ];
 		else if( depth == 0 && std::regex_match( line, m, ReConstScalar() ) )
 			name = m[ 2 ];

@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -61,28 +62,23 @@ std::string ReplaceIdent( const std::string& code, const std::string& name, cons
 	return std::regex_replace( code, re, "$1" + repl );
 }
 
-// data:image/png;base64,... -> fichier du cache média ; retourne la source "/media/a/<nom>"
-std::string SaveDataUrl( const std::string& dataUrl, const std::string& baseName )
+// data:<mime>;base64,... -> octets
+bool DecodeDataUrl( const std::string& dataUrl, std::vector< uint8_t >& out, std::string& mime )
 {
 	size_t comma = dataUrl.find( ',' );
 	if( dataUrl.rfind( "data:", 0 ) != 0 || comma == std::string::npos || dataUrl.find( ";base64" ) > comma )
-		return {};
-	std::string ext = ".png";
-	if( dataUrl.find( "image/jpeg" ) != std::string::npos )
-		ext = ".jpg";
-	else if( dataUrl.find( "image/gif" ) != std::string::npos )
-		ext = ".gif";
-	else if( dataUrl.find( "image/webp" ) != std::string::npos )
-		ext = ".webp";
+		return false;
+	mime = dataUrl.substr( 5, dataUrl.find( ';' ) - 5 );
 	static const std::string b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-	std::vector< uint8_t > out;
+	out.clear();
+	out.reserve( ( dataUrl.size() - comma ) * 3 / 4 );
 	int val = 0, bits = -8;
 	for( size_t i = comma + 1; i < dataUrl.size(); ++i )
 	{
 		size_t c = b64.find( dataUrl[ i ] );
 		if( c == std::string::npos )
 			continue;
-		val = ( val << 6 ) + (int)c;
+		val = ( ( val << 6 ) + (int)c ) & 0xFFFFFF;
 		bits += 6;
 		if( bits >= 0 )
 		{
@@ -90,9 +86,83 @@ std::string SaveDataUrl( const std::string& dataUrl, const std::string& baseName
 			bits -= 8;
 		}
 	}
-	if( out.empty() )
+	return !out.empty();
+}
+
+// data:image/png;base64,... -> fichier du cache média ; retourne la source "/media/a/<nom>"
+std::string SaveDataUrl( const std::string& dataUrl, const std::string& baseName )
+{
+	std::vector< uint8_t > out;
+	std::string mime;
+	if( !DecodeDataUrl( dataUrl, out, mime ) )
 		return {};
+	std::string ext = ".png";
+	if( mime == "image/jpeg" )
+		ext = ".jpg";
+	else if( mime == "image/gif" )
+		ext = ".gif";
+	else if( mime == "image/webp" )
+		ext = ".webp";
 	std::string name = SanitizeFileName( baseName ) + ext;
+	MakeDirs( MediaDir() );
+	WriteFileBytes( JoinPath( MediaDir(), name ), out.data(), out.size() );
+	return "/media/a/" + name;
+}
+
+// Texture flottante Shaderoo (« tile3d:64x64x64 … float32 ») -> volume au format Shadertoy (.bin)
+// enregistré dans le cache média ; retourne la source "/media/a/<nom>.bin", vide si illisible.
+std::string SaveShaderooFloatVolume( const std::vector< uint8_t >& b, const std::string& baseName )
+{
+	size_t hdrEnd = std::string::npos;
+	for( size_t i = 0; i + 1 < b.size() && i < 4096; ++i )
+		if( b[ i ] == '\n' && b[ i + 1 ] == '\n' )
+		{
+			hdrEnd = i + 2;
+			break;
+		}
+	if( hdrEnd == std::string::npos )
+		return {};
+	std::string hdr( b.begin(), b.begin() + hdrEnd );
+	int width = 0, height = 0, channels = 1, bits = 32, tw = 0, th = 0, td = 0;
+	std::stringstream ss( hdr );
+	std::string l;
+	while( std::getline( ss, l ) )
+	{
+		if( l.rfind( "width:", 0 ) == 0 ) width = atoi( l.c_str() + 6 );
+		else if( l.rfind( "height:", 0 ) == 0 ) height = atoi( l.c_str() + 7 );
+		else if( l.rfind( "channels:", 0 ) == 0 ) channels = atoi( l.c_str() + 9 );
+		else if( l.rfind( "bits_per_channel:", 0 ) == 0 ) bits = atoi( l.c_str() + 17 );
+		else if( l.rfind( "tile3d:", 0 ) == 0 ) sscanf( l.c_str() + 7, "%dx%dx%d", &tw, &th, &td );
+	}
+	if( bits != 32 || ( channels != 1 && channels != 4 ) || tw <= 0 || th <= 0 || td <= 0 || width < tw )
+		return {};
+	size_t px = (size_t)channels * 4;
+	if( b.size() < hdrEnd + (size_t)width * height * px )
+		return {};
+	int xnum = width / tw;
+	std::vector< uint8_t > out( 20 + (size_t)tw * th * td * px );
+	auto w32 = [ & ]( size_t o, uint32_t v ) { for( int k = 0; k < 4; ++k ) out[ o + k ] = uint8_t( v >> ( 8 * k ) ); };
+	memcpy( out.data(), "BIN\0", 4 );
+	w32( 4, tw );
+	w32( 8, th );
+	w32( 12, td );
+	out[ 16 ] = (uint8_t)channels;
+	out[ 17 ] = 0;
+	out[ 18 ] = 10;// flottant
+	out[ 19 ] = 0;
+	for( int z = 0; z < td; ++z )
+	{
+		int X = z % xnum, Y = z / xnum;
+		for( int y = 0; y < th; ++y )
+		{
+			size_t src = hdrEnd + ( (size_t)X * tw + (size_t)Y * th * width + (size_t)y * width ) * px;
+			size_t dst = 20 + ( (size_t)y * tw + (size_t)z * tw * th ) * px;
+			if( src + tw * px > b.size() )
+				return {};
+			memcpy( out.data() + dst, b.data() + src, tw * px );
+		}
+	}
+	std::string name = SanitizeFileName( baseName ) + ".bin";
 	MakeDirs( MediaDir() );
 	WriteFileBytes( JoinPath( MediaDir(), name ), out.data(), out.size() );
 	return "/media/a/" + name;
@@ -454,21 +524,43 @@ bool ConvertShaderoo( const json& b, json& out, std::string& title, std::string&
 	};
 
 	json images = b.value( "images", json::object() );
-	std::map< std::string, std::string > savedTex;
-	auto texSrc = [ & ]( const std::string& tok ) -> std::string {
+	struct TexInfo
+	{
+		std::string src;
+		bool volume = false;
+	};
+	std::map< std::string, TexInfo > savedTex;
+	auto texSrc = [ & ]( const std::string& tok ) -> TexInfo {
 		auto it = savedTex.find( tok );
 		if( it != savedTex.end() )
 			return it->second;
-		std::string src;
+		TexInfo ti;
+		std::string base = "shaderoo_" + ( std::regex_match( tok, std::regex( R"(\w+)" ) ) ? tok : ShortHash( tok ) );
 		if( images.contains( tok ) && images[ tok ].is_string() )
-			src = SaveDataUrl( images[ tok ].get< std::string >(), "shaderoo_" + ( std::regex_match( tok, std::regex( R"(\w+)" ) ) ? tok : ShortHash( tok ) ) );
-		savedTex[ tok ] = src;
-		return src;
+		{
+			const std::string du = images[ tok ].get< std::string >();
+			if( du.rfind( "data:image/", 0 ) == 0 )
+				ti.src = SaveDataUrl( du, base );
+			else
+			{
+				std::vector< uint8_t > bytes;
+				std::string mime;
+				if( DecodeDataUrl( du, bytes, mime ) )
+				{
+					ti.src    = SaveShaderooFloatVolume( bytes, base );
+					ti.volume = !ti.src.empty();
+				}
+			}
+		}
+		else if( std::regex_search( ToLower( tok ), std::regex( R"(^https?://[^ ]+\.(png|jpe?g|gif|webp|bmp)(\?|$))" ) ) )
+			ti.src = tok;// image en ligne : téléchargée au chargement
+		savedTex[ tok ] = ti;
+		return ti;
 	};
 
 	auto bufferLetter = []( const std::string& n ) -> int {
 		std::smatch mm;
-		if( std::regex_match( n, mm, std::regex( R"(Buff_([A-D])(?::0)?)" ) ) )
+		if( std::regex_match( n, mm, std::regex( R"((?:Ref:)?Buff_([A-D])(?::0)?(?::Tex0)?)" ) ) )
 			return mm[ 1 ].str()[ 0 ] - 'A';
 		return -1;
 	};
@@ -477,7 +569,9 @@ bool ConvertShaderoo( const json& b, json& out, std::string& title, std::string&
 		"// --- uniforms propres à Shaderoo (sans équivalent dans Resolume) ---\n"
 		"#define iMouseData vec4(0.0)\n#define iMouseMove vec4(0.0)\n#define iPassIndex 0\n#define iNumPasses 1\n"
 		"#define iNumTriangles 0\n#define iCaptureGeom 0\n#define SHADEROO\n#define SHADEROO_FRAGMENT_SHADER\n"
-		"vec4 FragColor1, FragColor2, FragColor3;\n";
+		"vec4 FragColor1, FragColor2, FragColor3;\n"
+		"#define iChannel0Resolution ( iChannelResolution[ 0 ].xy )\n#define iChannel1Resolution ( iChannelResolution[ 1 ].xy )\n"
+		"#define iChannel2Resolution ( iChannelResolution[ 2 ].xy )\n#define iChannel3Resolution ( iChannelResolution[ 3 ].xy )\n";
 
 	json passes = json::array();
 	bool haveImage = false;
@@ -516,6 +610,20 @@ bool ConvertShaderoo( const json& b, json& out, std::string& title, std::string&
 			code    = std::regex_replace( code, std::regex( "(uniform\\s+float\\s+" + u.first + "\\s*;)[^\\n]*" ),
 											  "$1 // " + GuessRangeComment( v ) );
 		}
+		// « #ShaderooNumPasses N » : la passe tourne N fois par image sur Shaderoo ; ici une fois par image,
+		// avec iPassIndex qui avance d'une image à l'autre (même résultat, N fois plus lent à se construire)
+		{
+			std::smatch nm;
+			static const std::regex reNum( R"((^|\n)[ \t]*#[ \t]*ShaderooNumPasses[ \t]+(\d+)[^\n]*)" );
+			if( std::regex_search( code, nm, reNum ) )
+			{
+				std::string n = nm[ 2 ].str();
+				code = std::regex_replace( code, reNum,
+										   "$1#undef iPassIndex\n#define iPassIndex ( iFrame % " + n + " )\n#undef iNumPasses\n#define iNumPasses " + n );
+				warnings.push_back( "« " + e.name + " » est calculé " + n + " fois par image sur Shaderoo : ici une fois par image, son résultat se construit sur " + n + " images." );
+			}
+		}
+		code = std::regex_replace( code, std::regex( R"((^|\n)[ \t]*#[ \t]*define[ \t]+iChannel[0-3]Resolution\b[^\n]*)" ), "$1" );
 		if( e.fixedSize )
 			warnings.push_back( "« " + e.name + " » a une résolution fixe sur Shaderoo : il est calculé ici à la résolution de la composition." );
 		json in = json::array();
@@ -535,12 +643,12 @@ bool ConvertShaderoo( const json& b, json& out, std::string& title, std::string&
 				in.push_back( SimpleInput( (int)i, "video" ) );
 			else
 			{
-				std::string src = texSrc( t );
-				if( !src.empty() )
-					in.push_back( SimpleInput( (int)i, "texture", src, true ) );
+				TexInfo ti = texSrc( t );
+				if( !ti.src.empty() )
+					in.push_back( SimpleInput( (int)i, ti.volume ? "volume" : "texture", ti.src, true ) );
 				else if( t.rfind( "Geom_", 0 ) != 0 && t.rfind( "src:", 0 ) != 0 && t.rfind( "Ref:", 0 ) != 0 )
 					warnings.push_back( "Texture « " + t + " » indisponible : canal " + std::to_string( i ) + " noir." );
-				if( src.empty() )
+				if( ti.src.empty() )
 					in.push_back( { { "channel", (int)i }, { "ctype", "none" }, { "src", "none" } } );
 			}
 		}
@@ -600,6 +708,297 @@ bool ConvertNeort( const json& b, json& out, std::string& title, std::string& er
 	return true;
 }
 
+//------------------------------------------------------------------ FragCoord (code natif : u_time, u_resolution, u_pass1…)
+// Paquet : { passes: [ { name, type: common|main|pass, language: glsl, code } ], title, author, url, license }
+bool ConvertFragCoord( const json& b, json& out, std::string& title, std::string& err, std::vector< std::string >& warnings )
+{
+	title              = b.value( "title", std::string( "FragCoord" ) );
+	std::string author = b.value( "author", std::string() );
+	if( !b.contains( "passes" ) || !b[ "passes" ].is_array() )
+	{
+		err = "shader FragCoord sans code";
+		return false;
+	}
+	std::string common;
+	bool haveMain = false;
+	std::string mainCode;
+	struct Aux
+	{
+		std::string name, code;
+		int number = 0;
+	};
+	std::vector< Aux > aux;
+	for( auto& p : b[ "passes" ] )
+	{
+		std::string type = p.value( "type", std::string() ), code = p.value( "code", std::string() ), name = p.value( "name", std::string() );
+		std::string lang = ToLower( p.value( "language", std::string( "glsl" ) ) );
+		if( lang != "glsl" && lang != "" )
+		{
+			warnings.push_back( "Passe « " + name + " » écrite en " + lang + " : non convertie." );
+			continue;
+		}
+		if( type == "common" )
+			common += code + "\n";
+		else if( type == "main" )
+		{
+			haveMain = true;
+			mainCode = code;
+		}
+		else if( type == "pass" )
+		{
+			Aux a;
+			a.name = name;
+			a.code = code;
+			std::smatch m;
+			a.number = std::regex_search( name, m, std::regex( R"((\d+)\s*$)" ) ) ? std::stoi( m[ 1 ] ) : (int)aux.size() + 1;
+			aux.push_back( a );
+		}
+		else
+			warnings.push_back( "Passe « " + name + " » de type " + type + " non prise en charge." );
+	}
+	if( !haveMain )
+	{
+		err = b.value( "source_available", true ) ? "pas de passe Main" : "le code de ce shader est caché (marketplace)";
+		return false;
+	}
+	std::sort( aux.begin(), aux.end(), []( const Aux& a, const Aux& c ) { return a.number < c.number; } );
+	if( aux.size() > 4 )
+	{
+		warnings.push_back( "Plus de 4 passes auxiliaires : les suivantes sont ignorées." );
+		aux.resize( 4 );
+	}
+	std::map< std::string, int > passLetter;// u_passN -> lettre du buffer
+	for( size_t i = 0; i < aux.size(); ++i )
+		passLetter[ "u_pass" + std::to_string( aux[ i ].number ) ] = (int)i;
+
+	// uniforms intégrés : déclaration retirée, remplacée par une macro
+	static const std::regex reBuiltinDecl(
+		R"((^|\n)[ \t]*uniform\s+(?:(?:lowp|mediump|highp)\s+)?\w+\s+(u_resolution|u_time|u_time_delta|u_frame|u_mouse|u_drag|u_scroll|u_date|u_refresh_rate|u_camera_pos|u_camera_dir|u_camera_view|u_color_gamut|u_recursion|u_max_recursion)\s*;[^\n]*)" );
+	static const std::regex reOutDecl( R"((^|\n)[ \t]*(?:layout\s*\([^)]*\)\s*)?out\s+(?:(?:lowp|mediump|highp)\s+)?vec4\s+fragColor\d*\s*;[^\n]*)" );
+	static const std::regex reSampler( R"((^|\n)[ \t]*uniform\s+(?:(?:lowp|mediump|highp)\s+)?sampler(2D|3D|Cube)\s+(\w+)\s*;([^\n]*))" );
+	static const std::regex reCustom( R"((^|\n)[ \t]*uniform\s+(?:(?:lowp|mediump|highp)\s+)?(float|int|bool|vec2|vec3|vec4)\s+(\w+)\s*;[ \t]*//([^\n]*))" );
+	std::map< std::string, std::string > customTex;// nom -> URL
+	auto clean = [ & ]( std::string code ) {
+		code = std::regex_replace( code, std::regex( R"((^|\n)[ \t]*#version[^\n]*)" ), "$1" );
+		code = std::regex_replace( code, reBuiltinDecl, "$1" );
+		code = std::regex_replace( code, reOutDecl, "$1" );
+		// samplers : déclaration retirée (macro vers un iChannel), URL éventuelle mémorisée
+		std::string rebuilt;
+		size_t last = 0;
+		for( std::sregex_iterator it( code.begin(), code.end(), reSampler ), end; it != end; ++it )
+		{
+			const std::smatch& m = *it;
+			rebuilt += code.substr( last, m.position( 0 ) - last ) + m[ 1 ].str();
+			last = m.position( 0 ) + m.length( 0 );
+			std::string n = m[ 3 ], c = Trim( m[ 4 ].str() );
+			if( c.rfind( "//", 0 ) == 0 )
+				c = Trim( c.substr( 2 ) );
+			if( m[ 2 ] != "2D" )
+				warnings.push_back( "Texture « " + n + " » (sampler" + m[ 2 ].str() + ") non prise en charge." );
+			else if( !passLetter.count( n ) && n != "u_main" && n != "u_audio" && n != "u_webcam" && n != "u_keyboard" )
+				customTex[ n ] = c;
+		}
+		code = rebuilt + code.substr( last );
+		// réglages : « uniform float x; //1.0, [0.0, 6.0] » -> slider Shader Loader (min max défaut)
+		rebuilt.clear();
+		last = 0;
+		for( std::sregex_iterator it( code.begin(), code.end(), reCustom ), end; it != end; ++it )
+		{
+			const std::smatch& m = *it;
+			rebuilt += code.substr( last, m.position( 0 ) - last ) + m[ 1 ].str();
+			last = m.position( 0 ) + m.length( 0 );
+			std::string type = m[ 2 ], n = m[ 3 ], c = m[ 4 ];
+			std::vector< float > vals, range;
+			std::string before = c, inside;
+			size_t lb = c.find( '[' ), rb = c.find( ']' );
+			if( lb != std::string::npos && rb != std::string::npos && rb > lb )
+			{
+				before = c.substr( 0, lb );
+				inside = c.substr( lb + 1, rb - lb - 1 );
+			}
+			auto nums = []( const std::string& t, std::vector< float >& v ) {
+				static const std::regex reN( R"([-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?)" );
+				for( std::sregex_iterator i( t.begin(), t.end(), reN ), e; i != e; ++i )
+					v.push_back( (float)atof( i->str().c_str() ) );
+			};
+			nums( before, vals );
+			nums( inside, range );
+			std::string decl = "uniform " + type + " " + n + ";";
+			if( ( type == "float" || type == "int" ) && !vals.empty() )
+			{
+				char buf[ 128 ];
+				float v = vals[ 0 ];
+				float mn = range.size() >= 2 ? range[ 0 ] : ( v == 0 ? -1.0f : std::min( 0.0f, v * 2 ) );
+				float mx = range.size() >= 2 ? range[ 1 ] : ( v == 0 ? 1.0f : std::max( 0.0f, v * 2 ) );
+				snprintf( buf, sizeof( buf ), " // %g %g %g", mn, mx, v );
+				decl += buf;
+			}
+			else if( type.rfind( "vec", 0 ) == 0 && !vals.empty() )
+			{
+				int nComp = type[ 3 ] - '0';
+				std::string args;
+				for( int k = 0; k < nComp; ++k )
+				{
+					char buf[ 32 ];
+					snprintf( buf, sizeof( buf ), "%g", vals[ std::min( (size_t)k, vals.size() - 1 ) ] );
+					std::string f = buf;
+					if( f.find_first_of( ".e" ) == std::string::npos )
+						f += ".0";
+					args += ( k ? ", " : "" ) + f;
+				}
+				decl = "const " + type + " " + n + " = " + type + "( " + args + " );";
+			}
+			else if( type == "bool" && !vals.empty() )
+				decl = std::string( "const bool " ) + n + " = " + ( vals[ 0 ] != 0 ? "true" : "false" ) + ";";
+			rebuilt += decl;
+		}
+		return rebuilt + code.substr( last );
+	};
+	common = clean( common );
+	// Common converti depuis le « golf » : fonction main() vide à retirer (elle doublerait celle des passes)
+	common   = std::regex_replace( common, std::regex( R"(\bvoid\s+main\s*\(\s*\)\s*\{[^{}]*\})" ), "" );
+	mainCode = clean( mainCode );
+	for( auto& a : aux )
+		a.code = clean( a.code );
+
+	auto uses = []( const std::string& code, const std::string& n ) { return std::regex_search( code, std::regex( "\\b" + n + "\\b" ) ); };
+	bool mainFeedback = uses( common, "u_main" ) || uses( mainCode, "u_main" );
+	for( auto& a : aux )
+		mainFeedback = mainFeedback || uses( a.code, "u_main" );
+	int mainLetter = -1;
+	if( mainFeedback )
+	{
+		if( aux.size() < 4 )
+			mainLetter = (int)aux.size();
+		else
+			warnings.push_back( "Main relit sa propre image (u_main) mais les 4 buffers sont pris : u_main sera noir." );
+	}
+
+	std::vector< std::string > samplerNames;
+	for( auto& kv : passLetter )
+		samplerNames.push_back( kv.first );
+	for( const char* n : { "u_main", "u_audio", "u_webcam", "u_keyboard" } )
+		samplerNames.push_back( n );
+	for( auto& kv : customTex )
+		samplerNames.push_back( kv.first );
+
+	auto inputFor = [ & ]( const std::string& n, int ch ) -> json {
+		auto pl = passLetter.find( n );
+		if( pl != passLetter.end() )
+			return BufferInput( ch, pl->second );
+		if( n == "u_main" )
+			return mainLetter >= 0 ? BufferInput( ch, mainLetter ) : json( { { "channel", ch }, { "ctype", "none" }, { "src", "none" } } );
+		if( n == "u_audio" )
+			return SimpleInput( ch, "music" );
+		if( n == "u_webcam" )
+			return SimpleInput( ch, "video" );
+		if( n == "u_keyboard" )
+			return SimpleInput( ch, "keyboard" );
+		std::string url = customTex.count( n ) ? customTex[ n ] : std::string();
+		if( url.rfind( "data:image/", 0 ) == 0 )
+			url = SaveDataUrl( url, "fragcoord_" + ShortHash( url ) );
+		else if( url.rfind( "http", 0 ) != 0 )
+		{
+			if( !url.empty() )
+				warnings.push_back( "Texture « " + n + " » (" + url + ") indisponible : canal noir." );
+			url.clear();
+		}
+		if( url.empty() )
+			return json( { { "channel", ch }, { "ctype", "none" }, { "src", "none" } } );
+		return SimpleInput( ch, "texture", url, true );
+	};
+
+	// canaux : les samplers cités dans Common ont le même canal dans toutes les passes
+	std::map< std::string, int > global;
+	for( auto& n : samplerNames )
+		if( uses( common, n ) )
+		{
+			if( global.size() >= 4 )
+			{
+				warnings.push_back( "Plus de 4 textures dans Common : « " + n + " » est ignorée." );
+				continue;
+			}
+			int ch          = (int)global.size();
+			global[ n ]     = ch;
+		}
+	std::string header = "// --- converti par Shader Loader depuis FragCoord ---\n"
+						 "#define u_resolution ( iResolution.xy )\n#define u_time iTime\n#define u_time_delta iTimeDelta\n#define u_frame iFrame\n"
+						 "#define u_mouse iMouse\n#define u_date iDate\n#define u_drag vec2( 0.0 )\n#define u_scroll 0.0\n#define u_refresh_rate 60.0\n"
+						 "#define u_camera_pos vec3( 0.0, 0.0, 3.0 )\n#define u_camera_dir vec3( 0.0, 0.0, -1.0 )\n#define u_camera_view mat4( 1.0 )\n"
+						 "#define u_color_gamut 0\n#define u_recursion 0\n#define u_max_recursion 1\n";
+	for( auto& kv : global )
+		header += "#define " + kv.first + " iChannel" + std::to_string( kv.second ) + "\n";
+
+	auto makePassCode = [ & ]( const std::string& code, const std::string& passName, json& inputs ) -> std::string {
+		std::map< std::string, int > local = global;
+		std::set< int > usedCh;
+		for( auto& kv : global )
+			usedCh.insert( kv.second );
+		std::string defs;
+		for( auto& n : samplerNames )
+		{
+			if( local.count( n ) || !uses( code, n ) )
+				continue;
+			int ch = 0;
+			while( ch < 4 && usedCh.count( ch ) )
+				++ch;
+			if( ch >= 4 )
+			{
+				warnings.push_back( "« " + passName + " » lit plus de 4 textures : « " + n + " » est ignorée." );
+				defs += "#define " + n + " iChannel3\n";
+				continue;
+			}
+			usedCh.insert( ch );
+			local[ n ] = ch;
+			defs += "#define " + n + " iChannel" + std::to_string( ch ) + "\n";
+		}
+		inputs = json::array();
+		for( auto& kv : local )
+			if( uses( common, kv.first ) || uses( code, kv.first ) )
+				inputs.push_back( inputFor( kv.first, kv.second ) );
+		if( code.find( "mainImage" ) != std::string::npos )
+			return defs + code;
+		static const std::regex reMain( R"(\bvoid\s+main\s*\(\s*(void)?\s*\))" );
+		if( !std::regex_search( code, reMain ) )
+			return defs + code;
+		std::string extra;
+		if( std::regex_search( code, std::regex( R"(\bfragColor[1-7]\b)" ) ) )
+		{
+			extra = "vec4 fragColor1, fragColor2, fragColor3, fragColor4, fragColor5, fragColor6, fragColor7;\n";
+			warnings.push_back( "« " + passName + " » écrit plusieurs sorties (fragColor1…) : seule la première est gardée." );
+		}
+		return defs + "vec4 stfx_fragColor;\n" + extra + "#define fragColor stfx_fragColor\n#define gl_FragColor stfx_fragColor\n#line 1\n" +
+			   std::regex_replace( code, reMain, "void stfx_user_main()" ) +
+			   "\n#undef fragColor\n#undef gl_FragColor\nvoid mainImage( out vec4 stfx_out, in vec2 stfx_coord )\n{\n\tstfx_fragColor = vec4( 0.0, 0.0, 0.0, 1.0 );\n\tstfx_user_main();\n\tstfx_out = stfx_fragColor;\n}\n";
+	};
+
+	static const char* names[] = { "Buffer A", "Buffer B", "Buffer C", "Buffer D" };
+	json passes = json::array();
+	passes.push_back( MakePass( "common", "Common", header + common, json::array(), -1 ) );
+	for( size_t i = 0; i < aux.size(); ++i )
+	{
+		json in;
+		std::string code = makePassCode( aux[ i ].code, aux[ i ].name, in );
+		passes.push_back( MakePass( "buffer", names[ i ], code, in, (int)i ) );
+	}
+	json in;
+	std::string code = makePassCode( mainCode, "Main", in );
+	if( mainLetter >= 0 )
+	{
+		passes.push_back( MakePass( "buffer", names[ mainLetter ], code, in, mainLetter ) );
+		passes.push_back( MakePass( "image", "Image",
+									"void mainImage( out vec4 fragColor, in vec2 fragCoord )\n{\n\tfragColor = texture( iChannel0, fragCoord / iResolution.xy );\n}\n",
+									json::array( { BufferInput( 0, mainLetter ) } ), -1 ) );
+	}
+	else
+		passes.push_back( MakePass( "image", "Image", code, in, -1 ) );
+	std::string desc = b.value( "url", std::string() );
+	if( b.contains( "license" ) && b[ "license" ].is_string() )
+		desc += "\nLicence : " + b[ "license" ].get< std::string >();
+	out = MakeShader( "fragcoord-" + b.value( "id", std::string() ), title, author, desc, passes );
+	return true;
+}
+
 std::string SiteDirName( const std::string& site )
 {
 	if( site == "shaderkit" ) return "ShaderKit";
@@ -644,6 +1043,8 @@ bool ConvertBundle( const std::string& bundleJson, std::string& shadertoyJson, s
 		ok = ConvertShaderoo( b, out, title, err, warnings );
 	else if( site == "neort" )
 		ok = ConvertNeort( b, out, title, err );
+	else if( site == "fragcoord" )
+		ok = ConvertFragCoord( b, out, title, err, warnings );
 	else
 		err = "site inconnu : " + site;
 	if( !ok )
@@ -658,6 +1059,20 @@ bool ConvertBundle( const std::string& bundleJson, std::string& shadertoyJson, s
 				p[ "code" ] = w + p[ "code" ].get< std::string >();
 	}
 	shadertoyJson = out.dump( 1, '\t' );
+	return true;
+}
+
+bool SaveImported( const std::string& site, const std::string& id, const std::string& title, const std::string& siteDir,
+				   const std::string& content, const std::string& ext, std::string& savedPath, std::string& err )
+{
+	std::string dir = JoinPath( RootDir(), siteDir.empty() ? SiteDirName( site ) : siteDir );
+	MakeDirs( dir );
+	savedPath = JoinPath( dir, SanitizeFileName( title.empty() ? id : title ) + " [" + site + "-" + id + "]" + ext );
+	if( !WriteFileText( savedPath, content ) )
+	{
+		err = "écriture impossible : " + savedPath;
+		return false;
+	}
 	return true;
 }
 
@@ -710,6 +1125,19 @@ bool ImportDownloadedExport( const std::string& file, std::string& savedPath, st
 				size_t eol = text.find( '\n', a );
 				text.replace( a, ( eol == std::string::npos ? text.size() : eol ) - a, "// @iChannel1 audio\n#define u_audio iChannel1" );
 			}
+			// paramètre de mainImage redéclaré dans le corps (« vec2 fragCoord = gl_FragCoord.xy; ») : on renomme le paramètre
+			std::smatch sig;
+			static const std::regex reSig( R"(void\s+mainImage\s*\(\s*out\s+vec4\s+(\w+)\s*,\s*in\s+vec2\s+(\w+)\s*\))" );
+			if( std::regex_search( text, sig, reSig ) )
+			{
+				std::string body = text.substr( sig.position( 0 ) + sig.length( 0 ) );
+				std::string col = sig[ 1 ], coord = sig[ 2 ];
+				bool rCoord = std::regex_search( body, std::regex( "\\bvec2\\s+" + coord + "\\s*[=;]" ) );
+				bool rCol   = std::regex_search( body, std::regex( "\\bvec4\\s+" + col + "\\s*[=;]" ) );
+				if( rCoord || rCol )
+					text = text.substr( 0, sig.position( 0 ) ) + "void mainImage( out vec4 " + ( rCol ? std::string( "stfx_fragColorOut" ) : col ) +
+						   ", in vec2 " + ( rCoord ? std::string( "stfx_fragCoordIn" ) : coord ) + " )" + body;
+			}
 			out = text;
 			ext = ".glsl";
 		}
@@ -730,14 +1158,8 @@ bool ImportDownloadedExport( const std::string& file, std::string& savedPath, st
 		if( !t2.empty() )
 			title = t2;
 	}
-	std::string dir = JoinPath( RootDir(), siteDir );
-	MakeDirs( dir );
-	savedPath = JoinPath( dir, SanitizeFileName( title.empty() ? id : title ) + " [" + site + "-" + id + "]" + ext );
-	if( !WriteFileText( savedPath, out ) )
-	{
-		err = "écriture impossible : " + savedPath;
+	if( !SaveImported( site, id, title, siteDir, out, ext, savedPath, err ) )
 		return false;
-	}
 	std::error_code ec;
 	fs::remove( P( file ), ec );
 	return true;
@@ -745,7 +1167,7 @@ bool ImportDownloadedExport( const std::string& file, std::string& savedPath, st
 
 const char* UniversalBookmarkletCode()
 {
-	return R"JS(javascript:(async()=>{ const say=m=>alert('Shader Loader : '+m); const clean=s=>(s||'').replace(/\s+/g,' ').replace(/[\\/:*?"<>|]/g,'_').trim().slice(0,80); const save=(name,blob)=>{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();}; const saveJson=(t,site,id,o)=>save(clean(t||id)+' ['+site+'-'+id+'].json',new Blob([JSON.stringify(o)],{type:'application/json'})); const toData=b=>new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b);}); const sleep=ms=>new Promise(r=>setTimeout(r,ms)); const h=location.hostname.replace(/^www\./,''),q=new URLSearchParams(location.search); try{ if(/shadertoy\.com$/.test(h)){ const m=location.pathname.match(/\/(?:view|embed)\/(\w{6})/);if(!m)return say('ouvre d\'abord un shader (shadertoy.com/view/...)'); const r=await fetch('/shadertoy',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'s='+encodeURIComponent(JSON.stringify({shaders:[m[1]]}))+'&nt=1&nl=1&np=1'}); const j=await r.json(),s=Array.isArray(j)?j[0]:j;if(!s||!s.renderpass)throw new Error('réponse inattendue'); save(clean((s.info&&s.info.name)||m[1])+' ['+m[1]+'].json',new Blob([JSON.stringify(s)],{type:'application/json'})); }else if(/shadered\.org$/.test(h)){ const id=q.get('s')||q.get('id');if(!id)return say('ouvre d\'abord un shader (shadered.org/view?s=...)'); const r=await fetch('/download?type=shader&id='+encodeURIComponent(id));if(!r.ok)throw new Error('HTTP '+r.status); const b=await r.blob(),u=new Uint8Array(await b.slice(0,2).arrayBuffer());if(u[0]!==80||u[1]!==75)throw new Error('pas d\'archive'); const t=(document.title||'').replace(/SHADERed/gi,'').replace(/^[\s\-|:]+|[\s\-|:]+$/g,''); save(clean(t||id)+' [shadered-'+id+'].zip',b); }else if(/shaderkit\.com$/.test(h)){ const m=location.pathname.match(/\/s\/([\w-]+)/),btn=document.getElementById('exportJson');if(!m||!btn)return say('ouvre d\'abord un shader (shaderkit.com/s/...)'); let cap=null;const o=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){if(/^shader_state/.test(this.download||'')){cap=this.href;return;}return o.call(this);}; try{btn.click();}finally{HTMLAnchorElement.prototype.click=o;} if(!cap)throw new Error('export JSON indisponible'); const st=JSON.parse(decodeURIComponent(cap.slice(cap.indexOf(',')+1)));delete st.thumbnailUrl; saveJson(st.title,'shaderkit',m[1],{stfx:1,site:'shaderkit',id:m[1],url:location.href,data:st}); }else if(/fragcoord\.xyz$/.test(h)){ const m=location.pathname.match(/\/s\/([\w-]+)/);if(!m)return say('ouvre d\'abord un shader (fragcoord.xyz/s/...)'); const eb=[...document.querySelectorAll('button')].find(b=>b.innerText.trim()==='Export');if(!eb)throw new Error('bouton Export introuvable'); eb.click();let sel=null;for(let i=0;i<30&&!sel;i++){await sleep(100);sel=[...document.querySelectorAll('select')].find(s=>[...s.options].some(o=>o.value==='shadertoy'));} if(!sel)throw new Error('menu d\'export introuvable'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(sel,'shadertoy');sel.dispatchEvent(new Event('change',{bubbles:true})); let code='',box=sel.closest('[role=dialog]')||sel.parentElement.parentElement.parentElement; for(let i=0;i<30&&!/mainImage|void\s+main/.test(code);i++){await sleep(100);const e=[...box.querySelectorAll('textarea,pre,code')].sort((a,b)=>(b.value||b.innerText).length-(a.value||a.innerText).length)[0];code=e?(e.value||e.innerText):'';} document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); if(!code)throw new Error('code introuvable'); const t=document.title.replace(/\s*[—|-]\s*FragCoord.*$/i,''); const au=(document.querySelector('a[href^="/u/"]')||{}).innerText||''; save(clean(t||m[1])+' [fragcoord-'+m[1]+'].glsl',new Blob(['// '+t+' par '+au+' - '+location.href+'\n'+code],{type:'text/plain'})); }else if(/shaderoo\.org$/.test(h)){ const id=q.get('shader')||(document.getElementById('shaderIDInput')||{}).value;if(!id)return say('ouvre d\'abord un shader (shaderoo.org/?shader=...)'); const raw=await (await fetch('/index.php?cmd=loaddb&id='+encodeURIComponent(id))).text(); const ta=document.createElement('textarea');ta.innerHTML=raw;let sc=ta.value; sc=sc.replace(/<and\/>/g,'&').replace(/<plus\/>/g,'+').replace(/<modulo\/>/g,'%').replace(/<br\/>/g,'\n').replace(/<backslash\/>/g,'\\'); const images={},head=sc.split('###BEGIN:')[0]; for(const line of head.split('\n')){if(/^#/.test(line))continue;const w=line.trim().split(/\s+/);for(const n of w.slice(1)){if(/\.glsl$|^opt:|^local:/.test(n)||images[n]!==undefined||!/^\w+$/.test(n))continue; images[n]=null;try{const r=await fetch('/textures/'+n+'.png');if(r.ok&&/image/.test(r.headers.get('content-type')||''))images[n]=await toData(await r.blob());}catch(e){}}} const t=(sc.match(/###TITLE:(.*)/)||[])[1]||id; saveJson(t,'shaderoo',id,{stfx:1,site:'shaderoo',id,url:location.href,scene:sc,images}); }else if(/neort\.io$/.test(h)){ const m=location.pathname.match(/\/art\/(\w+)/);if(!m)return say('ouvre d\'abord une œuvre (neort.io/art/...)'); const raw=await (await fetch(location.pathname,{headers:{RSC:'1'}})).text(); const k=raw.indexOf('"codes":[');if(k<0)throw new Error('code introuvable'); let i=k+8,d=0,s=false,e=false;for(;i<raw.length;i++){const c=raw[i];if(s){if(e)e=false;else if(c==='\\')e=true;else if(c==='"')s=false;continue;}if(c==='"')s=true;else if(c==='[')d++;else if(c===']'&&--d===0)break;} const codes=JSON.parse(raw.slice(k+8,i+1)),enc=new TextEncoder(),dec=new TextDecoder(); for(const c of codes){if(typeof c.text==='string'&&/^\$[0-9a-f]+$/i.test(c.text)){const ref=c.text.slice(1),p=raw.search(new RegExp('(^|\\n)'+ref+':T([0-9a-f]+),'));if(p<0)continue;const mm=raw.slice(p).match(/:T([0-9a-f]+),/);const st=raw.indexOf(mm[0],p)+mm[0].length;c.text=dec.decode(enc.encode(raw.slice(st,st+parseInt(mm[1],16))).slice(0,parseInt(mm[1],16)));}} if(!codes.some(c=>/gl_FragColor|mainImage|out\s+vec4|void\s+main/.test(c.text||'')))return say('cette œuvre n\'est pas un shader GLSL (JavaScript / p5 / three.js non pris en charge)'); const tm=raw.match(new RegExp('"id":"'+m[1]+'","title":("(?:[^"\\\\]|\\\\.)*")'));const t=tm?JSON.parse(tm[1]):document.title; const um=raw.match(/"user":\{"id":"[^"]*","customId":"([^"]*)"/); saveJson(t,'neort',m[1],{stfx:1,site:'neort',id:m[1],url:location.href,title:t,author:um?um[1]:'',codes}); }else say('site non pris en charge. Sites : shadertoy.com, shadered.org, shaderkit.com, fragcoord.xyz, shaderoo.org, neort.io'); }catch(e){say('export impossible ('+e.message+'). Copie le code dans l\'onglet FICHIER.');} })();)JS";
+	return R"JS(javascript:(async()=>{ const say=m=>alert('Shader Loader : '+m); const clean=s=>(s||'').replace(/\s+/g,' ').replace(/[\\/:*?"<>|]/g,'_').trim().slice(0,80); const save=(name,blob)=>{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();}; const saveJson=(t,site,id,o)=>save(clean(t||id)+' ['+site+'-'+id+'].json',new Blob([JSON.stringify(o)],{type:'application/json'})); const toData=b=>new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b);}); const sleep=ms=>new Promise(r=>setTimeout(r,ms)); const h=location.hostname.replace(/^www\./,''),q=new URLSearchParams(location.search); try{ if(/shadertoy\.com$/.test(h)){ const m=location.pathname.match(/\/(?:view|embed)\/(\w{6})/);if(!m)return say('ouvre d\'abord un shader (shadertoy.com/view/...)'); const r=await fetch('/shadertoy',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'s='+encodeURIComponent(JSON.stringify({shaders:[m[1]]}))+'&nt=1&nl=1&np=1'}); const j=await r.json(),s=Array.isArray(j)?j[0]:j;if(!s||!s.renderpass)throw new Error('réponse inattendue'); save(clean((s.info&&s.info.name)||m[1])+' ['+m[1]+'].json',new Blob([JSON.stringify(s)],{type:'application/json'})); }else if(/shadered\.org$/.test(h)){ const id=q.get('s')||q.get('id');if(!id)return say('ouvre d\'abord un shader (shadered.org/view?s=...)'); const r=await fetch('/download?type=shader&id='+encodeURIComponent(id));if(!r.ok)throw new Error('HTTP '+r.status); const b=await r.blob(),u=new Uint8Array(await b.slice(0,2).arrayBuffer());if(u[0]!==80||u[1]!==75)throw new Error('pas d\'archive'); const t=(document.title||'').replace(/SHADERed/gi,'').replace(/^[\s\-|:]+|[\s\-|:]+$/g,''); save(clean(t||id)+' [shadered-'+id+'].zip',b); }else if(/shaderkit\.com$/.test(h)){ const m=location.pathname.match(/\/s\/([\w-]+)/),btn=document.getElementById('exportJson');if(!m||!btn)return say('ouvre d\'abord un shader (shaderkit.com/s/...)'); let cap=null;const o=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){if(/^shader_state/.test(this.download||'')){cap=this.href;return;}return o.call(this);}; try{btn.click();}finally{HTMLAnchorElement.prototype.click=o;} if(!cap)throw new Error('export JSON indisponible'); const st=JSON.parse(decodeURIComponent(cap.slice(cap.indexOf(',')+1)));delete st.thumbnailUrl; saveJson(st.title,'shaderkit',m[1],{stfx:1,site:'shaderkit',id:m[1],url:location.href,data:st}); }else if(/fragcoord\.xyz$/.test(h)){ const m=location.pathname.match(/\/s\/([\w-]+)/);if(!m)return say('ouvre d\'abord un shader (fragcoord.xyz/s/...)'); let n=1;const mcp=async(name,args)=>{const r=await fetch('/mcp',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:n++,method:'tools/call',params:{name,arguments:args}})});let t=await r.text();if(t[0]!=='{'){const d=t.match(/data:\s*(\{.*\})/);t=d?d[1]:t;}const j=JSON.parse(t);if(!j.result||j.result.isError)throw new Error((j.result&&j.result.content&&j.result.content[0].text)||(j.error&&j.error.message)||'erreur FragCoord');return j.result.structuredContent;}; const sh=await mcp('get_shader',{slug:m[1],include_source:true}); if(sh.source_available===false)return say('le code de ce shader est caché (marketplace)'); for(const p of sh.passes||[]){const l=(p.language||'glsl').toLowerCase();if(l!=='glsl'){try{const c=await mcp('convert_shader',{source:p.code,from:l,to:'glsl'});if(c&&c.output){p.code=c.output;p.language='glsl';}}catch(e){}}} const lic=sh.license&&typeof sh.license==='object'?(sh.license.name||sh.license.spdx):sh.license; saveJson(sh.title,'fragcoord',m[1],{stfx:1,site:'fragcoord',id:m[1],url:location.origin+'/s/'+m[1],title:sh.title,author:sh.author,license:lic||null,source_available:true,passes:sh.passes}); }else if(/shaderoo\.org$/.test(h)){ const id=q.get('shader')||(document.getElementById('shaderIDInput')||{}).value;if(!id)return say('ouvre d\'abord un shader (shaderoo.org/?shader=...)'); const raw=await (await fetch('/index.php?cmd=loaddb&id='+encodeURIComponent(id))).text(); const ta=document.createElement('textarea');ta.innerHTML=raw;let sc=ta.value; sc=sc.replace(/<and\/>/g,'&').replace(/<plus\/>/g,'+').replace(/<modulo\/>/g,'%').replace(/<br\/>/g,'\n').replace(/<backslash\/>/g,'\\'); const images={},head=sc.split('###BEGIN:')[0]; for(const line of head.split('\n')){if(/^#/.test(line))continue;const w=line.trim().split(/\s+/);for(const n of w.slice(1)){if(/\.glsl$|^opt:|^local:/.test(n)||images[n]!==undefined||!/^\w+$/.test(n))continue; images[n]=null;try{const r=await fetch('/textures/'+n+'.png');if(r.ok&&/image/.test(r.headers.get('content-type')||''))images[n]=await toData(await r.blob());else{const f=await fetch('/textures/'+n+'.float');if(f.ok){const bl=await f.blob();if(bl.size>100)images[n]=await toData(new Blob([bl],{type:'application/octet-stream'}));}}}catch(e){}}} const t=(sc.match(/###TITLE:(.*)/)||[])[1]||id; saveJson(t,'shaderoo',id,{stfx:1,site:'shaderoo',id,url:location.href,scene:sc,images}); }else if(/neort\.io$/.test(h)){ const m=location.pathname.match(/\/art\/(\w+)/);if(!m)return say('ouvre d\'abord une œuvre (neort.io/art/...)'); const raw=await (await fetch(location.pathname,{headers:{RSC:'1'}})).text(); const k=raw.indexOf('"codes":[');if(k<0)throw new Error('code introuvable'); let i=k+8,d=0,s=false,e=false;for(;i<raw.length;i++){const c=raw[i];if(s){if(e)e=false;else if(c==='\\')e=true;else if(c==='"')s=false;continue;}if(c==='"')s=true;else if(c==='[')d++;else if(c===']'&&--d===0)break;} const codes=JSON.parse(raw.slice(k+8,i+1)),enc=new TextEncoder(),dec=new TextDecoder(); for(const c of codes){if(typeof c.text==='string'&&/^\$[0-9a-f]+$/i.test(c.text)){const ref=c.text.slice(1),p=raw.search(new RegExp('(^|\\n)'+ref+':T([0-9a-f]+),'));if(p<0)continue;const mm=raw.slice(p).match(/:T([0-9a-f]+),/);const st=raw.indexOf(mm[0],p)+mm[0].length;c.text=dec.decode(enc.encode(raw.slice(st,st+parseInt(mm[1],16))).slice(0,parseInt(mm[1],16)));}} if(!codes.some(c=>/gl_FragColor|mainImage|out\s+vec4|void\s+main/.test(c.text||'')))return say('cette œuvre n\'est pas un shader GLSL (JavaScript / p5 / three.js non pris en charge)'); const tm=raw.match(new RegExp('"id":"'+m[1]+'","title":("(?:[^"\\\\]|\\\\.)*")'));const t=tm?JSON.parse(tm[1]):document.title; const um=raw.match(/"user":\{"id":"[^"]*","customId":"([^"]*)"/); saveJson(t,'neort',m[1],{stfx:1,site:'neort',id:m[1],url:location.href,title:t,author:um?um[1]:'',codes}); }else say('site non pris en charge. Sites : shadertoy.com, shadered.org, shaderkit.com, fragcoord.xyz, shaderoo.org, neort.io'); }catch(e){say('export impossible ('+e.message+'). Copie le code dans l\'onglet FICHIER.');} })();)JS";
 }
 }//namespace sites
 }//namespace stfx
