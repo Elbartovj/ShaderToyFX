@@ -96,6 +96,7 @@ private:
 	bool resetUserAfterApply = false;// après « Save as Default » : sliders remis au milieu (= nouvelle valeur)
 	void SaveCurrentAsDefaults();
 	void CaptureIfRequested( GLuint hostFbo, int x, int y, int w, int h );
+	void ExportIfRequested();
 	bool userTouched[ stfx::kMaxUserParams ] = {};// valeur restaurée par Resolume (composition)
 	std::vector< float > fftScratch;
 	char displayBuf[ 64 ] = {};

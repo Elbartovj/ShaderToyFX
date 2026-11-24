@@ -144,6 +144,17 @@ Un seul favori suffit pour importer depuis six sites. Pas besoin d'extension Fir
 
 Les fichiers `.frag` / `.glsl` avec `void main()` (style The Book of Shaders, GLSLSandbox, GLSL ES 3 avec `out vec4`) sont aussi convertis automatiquement quand tu les ouvres dans l'onglet FICHIER.
 
+## Exporter un shader en plugin FFGL autonome
+
+Onglet **ÉDITEUR** → **Exporter en plugin FFGL…** : crée une DLL qui contient le shader (code, images, valeurs des sliders) et apparaît dans Resolume sous son propre nom, comme n'importe quel effet ou source, sans bibliothèque ni panneau.
+
+- **Nom dans Resolume** : 16 caractères au plus. L'identifiant FFGL (4 caractères) est tiré du nom : deux exports du même nom remplacent le même plugin.
+- **Effet / Source** : proposé selon que le shader lit l'entrée Resolume ou non.
+- **Réglages actuels des sliders comme valeurs par défaut** : le plugin démarre avec le rendu que tu as réglé.
+- Le fichier `Shader Loader - <nom>.dll` est écrit par défaut dans le dossier de Shader Loader (que Resolume scanne déjà). Redémarre Resolume pour le voir.
+- Le plugin exporté contient tout Shader Loader (~10 Mo). Il fonctionne sur un autre PC sans Shader Loader installé. Pas pour les projets SHADERed ni les shaders Godot.
+- Respecte la licence du shader si tu diffuses le plugin (la plupart des shaders Shadertoy sont « non commercial »).
+
 ## Améliorer un shader avec Claude
 
 ### Avec Claude Desktop (ton abonnement Claude, sans clé API)

@@ -156,6 +156,16 @@ void RequestRestart( const SharedPtr& s )
 	s->restartRequested = true;
 }
 
+void RequestExportPlugin( const SharedPtr& s, const std::string& name, const std::string& path, bool source, bool useCurrentValues )
+{
+	std::lock_guard< std::mutex > lock( s->m );
+	s->exportRequested  = true;
+	s->exportName       = name;
+	s->exportPath       = path;
+	s->exportSource     = source;
+	s->exportUseCurrent = useCurrentValues;
+}
+
 void RequestSaveDefaults( const SharedPtr& s )
 {
 	std::lock_guard< std::mutex > lock( s->m );

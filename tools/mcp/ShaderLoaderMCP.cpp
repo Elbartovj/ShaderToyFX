@@ -1,8 +1,9 @@
 // Shader Loader - serveur MCP pour Claude Desktop (stdio, JSON-RPC 2.0).
 // Lancé par Claude Desktop (extension .mcpb). Relaie les outils vers les instances du plugin dans Resolume
-// par les canaux nommés locaux \\.\pipe\ShaderLoaderBridge-<pid>-<effect|source>.
+// par les canaux nommés locaux \\.\pipe\ShaderLoaderBridge-<pid>-<effect|source>-<module>.
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstdio>
 #include <iostream>
 #include <string>
@@ -50,10 +51,11 @@ std::vector< std::wstring > ListPipes()
 			out.push_back( L"\\\\.\\pipe\\" + n );
 	} while( FindNextFileW( h, &fd ) );
 	FindClose( h );
+	std::sort( out.begin(), out.end() );
 	return out;
 }
 
-char KindLetter( const std::wstring& pipe ) { return pipe.size() > 6 && pipe.substr( pipe.size() - 6 ) == L"source" ? 'S' : 'E'; }
+char KindLetter( const std::wstring& pipe ) { return pipe.find( L"-source" ) != std::wstring::npos ? 'S' : 'E'; }
 
 bool Ask( const std::wstring& pipe, const json& req, json& res, std::string& err )
 {
@@ -103,6 +105,21 @@ bool Ask( const std::wstring&, const json&, json&, std::string& err )
 }
 #endif
 
+// plusieurs DLL du même type (Shader Loader + plugins exportés) : suffixe "-2", "-3"… pour les suivantes
+std::string PipeSuffix( const std::vector< std::wstring >& pipes, const std::wstring& p )
+{
+	int ord = 0;
+	for( auto& q : pipes )
+	{
+		if( KindLetter( q ) != KindLetter( p ) )
+			continue;
+		++ord;
+		if( q == p )
+			break;
+	}
+	return ord > 1 ? "-" + std::to_string( ord ) : "";
+}
+
 struct Target
 {
 	std::wstring pipe;
@@ -121,24 +138,29 @@ bool Resolve( const json& args, Target& t, std::string& err )
 	std::string inst = args.value( "instance", std::string() );
 	if( !inst.empty() )
 	{
+		// "E1", "S2", "E1-2" (2e DLL d'effet), "1"
 		char kind = 0;
 		if( inst[ 0 ] == 'E' || inst[ 0 ] == 'e' || inst[ 0 ] == 'S' || inst[ 0 ] == 's' )
 		{
 			kind = (char)toupper( inst[ 0 ] );
 			inst = inst.substr( 1 );
 		}
+		std::string suffix;
+		size_t dash = inst.find( '-' );
+		if( dash != std::string::npos )
+		{
+			suffix = inst.substr( dash );
+			inst   = inst.substr( 0, dash );
+		}
 		int id = atoi( inst.c_str() );
 		for( auto& p : pipes )
-			if( !kind || KindLetter( p ) == kind )
+			if( ( !kind || KindLetter( p ) == kind ) && PipeSuffix( pipes, p ) == suffix )
 			{
 				t.pipe = p;
 				t.id   = id;
-				if( kind || pipes.size() == 1 )
-					return true;
+				return true;
 			}
-		if( t.id >= 0 && !t.pipe.empty() )
-			return true;
-		err = "instance inconnue : " + args.value( "instance", std::string() );
+		err = "instance inconnue : " + args.value( "instance", std::string() ) + " (voir list_instances)";
 		return false;
 	}
 	if( pipes.size() == 1 )
@@ -256,7 +278,7 @@ json CallTool( const std::string& name, const json& args )
 				continue;
 			for( auto i : res.value( "instances", json::array() ) )
 			{
-				i[ "instance" ] = std::string( 1, KindLetter( p ) ) + std::to_string( i.value( "id", 0 ) );
+				i[ "instance" ] = std::string( 1, KindLetter( p ) ) + std::to_string( i.value( "id", 0 ) ) + PipeSuffix( pipes, p );
 				i.erase( "id" );
 				all.push_back( i );
 			}

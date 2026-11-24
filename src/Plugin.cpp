@@ -4,6 +4,7 @@
 #include "Panel.h"
 #include "Util.h"
 #include "ShadertoyApi.h"
+#include "Export.h"
 #include <thread>
 #include <ffgl/FFGLLog.h>
 #include <ctime>
@@ -13,29 +14,22 @@
 
 using namespace stfx;
 
+// Une DLL exportée (shader intégré, voir Export.h) prend le nom, l'identifiant et le type de ce shader
 #ifdef STFX_SOURCE
-static const bool kIsSource = true;
-static CFFGLPluginInfo PluginInfo(
-	PluginFactory< ShaderToyFX >,
-	"STFS",
-	"Shader Loader Src",
-	2, 1,
-	1, 0,
-	FF_SOURCE,
-	"Shadertoy, SHADERed, ShaderKit, FragCoord, Shaderoo, NEORT shaders as a source (library: Browse Library)",
-	"Shader Loader - open source" );
+static const bool kBuiltSource = true;
 #else
-static const bool kIsSource = false;
-static CFFGLPluginInfo PluginInfo(
-	PluginFactory< ShaderToyFX >,
-	"STFX",
-	"Shader Loader",
-	2, 1,
-	1, 0,
-	FF_EFFECT,
-	"Shadertoy, SHADERed, ShaderKit, FragCoord, Shaderoo, NEORT shaders as an effect (library: Browse Library)",
-	"Shader Loader - open source" );
+static const bool kBuiltSource = false;
 #endif
+static const bool kStandalone = standalone::Get().present;
+static const bool kIsSource   = kStandalone ? standalone::Get().source : kBuiltSource;
+static const std::string kInfoId   = kStandalone ? standalone::Get().id : std::string( kBuiltSource ? "STFS" : "STFX" );
+static const std::string kInfoName = kStandalone ? standalone::Get().name : std::string( kBuiltSource ? "Shader Loader Src" : "Shader Loader" );
+static const std::string kInfoDesc =
+	kStandalone ? standalone::Get().description
+				: std::string( "Shadertoy, SHADERed, ShaderKit, FragCoord, Shaderoo, NEORT shaders as " ) + ( kBuiltSource ? "a source" : "an effect" ) +
+					  " (library: Browse Library)";
+static CFFGLPluginInfo PluginInfo( PluginFactory< ShaderToyFX >, kInfoId.c_str(), kInfoName.c_str(), 2, 1, 1, 0, kIsSource ? FF_SOURCE : FF_EFFECT,
+								   kInfoDesc.c_str(), "Shader Loader - open source" );
 
 static const unsigned int kFftSize = 512;
 
@@ -145,6 +139,12 @@ ShaderToyFX::ShaderToyFX()
 	for( int i = 0; i < kMaxUserParams; ++i )
 		values[ PT_USER0 + i ] = 0.5f;
 
+	if( kStandalone )
+	{
+		// plugin exporté : shader fixe, ni bibliothèque ni chargement
+		for( unsigned int i : { (unsigned)PT_SHADER, (unsigned)PT_BROWSE, (unsigned)PT_RANDOM, (unsigned)PT_RANDOM_FROM } )
+			SetParamVisibility( i, false, false );
+	}
 	shared = std::make_shared< InstanceShared >();
 #ifdef STFX_SOURCE
 	shared->moduleKind = "source";
@@ -375,6 +375,14 @@ FFResult ShaderToyFX::InitGL( const FFGLViewportStruct* vp )
 	}
 	else
 		FFGLLog::LogToHost( ( "Shader Loader: shader par défaut invalide\n" + log ).c_str() );
+	if( kStandalone )
+	{
+		std::string path = standalone::PrepareShaderFile();
+		if( !path.empty() )
+			RequestLoadFile( shared, path, false );
+		else
+			FFGLLog::LogToHost( "Shader Loader: shader intégré illisible" );
+	}
 	ResetClock();
 	return CFFGLPlugin::InitGL( vp );
 }
@@ -396,7 +404,7 @@ void ShaderToyFX::ResetClock()
 void ShaderToyFX::ApplyUserParams( const std::vector< UserParam >& params, bool resetValues, bool keepHostValues )
 {
 	userParams = params;
-	SetParamVisibility( PT_SAVE_DEFAULTS, !params.empty(), true );
+	SetParamVisibility( PT_SAVE_DEFAULTS, !params.empty() && !kStandalone, true );
 	for( unsigned int i = 0; i < (unsigned)kMaxUserParams; ++i )
 	{
 		unsigned int idx = PT_USER0 + i;
@@ -412,6 +420,65 @@ void ShaderToyFX::ApplyUserParams( const std::vector< UserParam >& params, bool 
 			}
 		}
 	}
+}
+
+// Export en plugin FFGL autonome : copie du shader actuel (sliders actuels = valeurs par défaut si demandé)
+void ShaderToyFX::ExportIfRequested()
+{
+	standalone::ExportOptions opt;
+	bool useCurrent;
+	std::shared_ptr< const ShaderDoc > cur;
+	{
+		std::lock_guard< std::mutex > lock( shared->m );
+		if( !shared->exportRequested )
+			return;
+		shared->exportRequested = false;
+		opt.name                = shared->exportName;
+		opt.outPath             = shared->exportPath;
+		opt.source              = shared->exportSource;
+		useCurrent              = shared->exportUseCurrent;
+		cur                     = shared->current;
+	}
+	auto finish = [ this ]( bool ok, const std::string& msg ) {
+		std::lock_guard< std::mutex > lock( shared->m );
+		shared->exportOk     = ok;
+		shared->exportResult = msg;
+		shared->exportSerial++;
+	};
+	if( !cur )
+	{
+		finish( false, "aucun shader chargé" );
+		return;
+	}
+	auto doc = std::make_shared< ShaderDoc >( *cur );
+	if( useCurrent && !doc->IsShadered() )
+	{
+		std::vector< float > real;
+		for( size_t i = 0; i < userParams.size() && i < (size_t)kMaxUserParams; ++i )
+			real.push_back( UserParamValue( userParams[ i ], values[ PT_USER0 + i ] ) );
+		RewriteParamDefaults( *doc, real );
+	}
+	std::weak_ptr< InstanceShared > weak = shared;
+	PinModuleForThreads();
+	std::thread( [ weak, doc, opt ] {
+		std::string err;
+		bool ok = false;
+		try
+		{
+			ok = standalone::WritePlugin( *doc, opt, err );
+		}
+		catch( const std::exception& e )
+		{
+			err = e.what();
+		}
+		if( auto s = weak.lock() )
+		{
+			std::lock_guard< std::mutex > lock( s->m );
+			s->exportOk     = ok;
+			s->exportResult = ok ? "Plugin exporté : " + opt.outPath : "Export impossible : " + err;
+			s->exportSerial++;
+		}
+	} ).detach();
 }
 
 // Réécrit le fichier du shader : les valeurs actuelles des sliders deviennent ses valeurs par défaut
@@ -478,6 +545,7 @@ void ShaderToyFX::ApplyPending()
 	}
 	if( saveDefaults )
 		SaveCurrentAsDefaults();
+	ExportIfRequested();
 
 	std::unique_ptr< ShaderDoc > doc;
 	bool userInitiated = false, restart = false;
@@ -709,10 +777,12 @@ FFResult ShaderToyFX::SetFloatParameter( unsigned int index, float value )
 	switch( index )
 	{
 	case PT_BROWSE:
-		Panel::Open( shared );
+		if( !kStandalone )
+			Panel::Open( shared );
 		break;
 	case PT_RANDOM:
-		RequestRandom( shared, RandomSource() );
+		if( !kStandalone )
+			RequestRandom( shared, RandomSource() );
 		break;
 	case PT_RESTART:
 		RequestRestart( shared );
@@ -757,6 +827,8 @@ FFResult ShaderToyFX::SetTextParameter( unsigned int index, const char* value )
 	}
 	if( index != PT_SHADER )
 		return FF_FAIL;
+	if( kStandalone )
+		return FF_SUCCESS;// plugin exporté : shader intégré, le chemin enregistré dans la composition est ignoré
 	std::string path = value ? value : "";
 	if( path == shaderPath )
 		return FF_SUCCESS;

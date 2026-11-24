@@ -37,6 +37,14 @@ struct InstanceShared
 	int captureW = 0, captureH = 0;
 	uint64_t captureSerial = 0;
 	std::string moduleKind;// "effect" ou "source"
+
+	// export en plugin FFGL autonome (fait par le thread de rendu : il connaît les valeurs des sliders)
+	bool exportRequested = false;
+	std::string exportName, exportPath;
+	bool exportSource = false, exportUseCurrent = true;
+	std::string exportResult;// message final (succès ou erreur)
+	bool exportOk = false;
+	uint64_t exportSerial = 0;
 };
 using SharedPtr = std::shared_ptr< InstanceShared >;
 
@@ -61,6 +69,7 @@ void RequestRandom( const SharedPtr& s, const std::string& source );
 void RequestApplyDoc( const SharedPtr& s, ShaderDoc doc, bool userInitiated );
 void RequestRestart( const SharedPtr& s );
 void RequestSaveDefaults( const SharedPtr& s );
+void RequestExportPlugin( const SharedPtr& s, const std::string& name, const std::string& path, bool source, bool useCurrentValues );
 InstanceSnapshot Snapshot( const SharedPtr& s );
 
 // Registre global des instances vivantes

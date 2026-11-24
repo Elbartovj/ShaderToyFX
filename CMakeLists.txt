@@ -85,7 +85,7 @@ endif()
 # ---- code commun
 set(STFX_SOURCES
     src/Util.cpp src/License.cpp src/Net.cpp src/ShaderDoc.cpp src/Params.cpp src/ShadertoyApi.cpp src/GlslGen.cpp
-    src/Renderer.cpp src/Sites.cpp src/SitesWeb.cpp src/Claude.cpp src/Bridge.cpp src/Instance.cpp src/Panel.cpp src/Preview.cpp src/Plugin.cpp src/StbImpl.cpp
+    src/Renderer.cpp src/Sites.cpp src/SitesWeb.cpp src/Claude.cpp src/Bridge.cpp src/Export.cpp src/Instance.cpp src/Panel.cpp src/Preview.cpp src/Plugin.cpp src/StbImpl.cpp
     src/sed/SedProject.cpp src/sed/SedCompiler.cpp src/sed/SedGeometry.cpp src/sed/SedRenderer.cpp src/sed/SedGodot.cpp
     src/sed/SedArchive.cpp)
 

@@ -6,6 +6,7 @@
 #include "License.h"
 #include "Preview.h"
 #include "Claude.h"
+#include "Export.h"
 #include "sed/SedArchive.h"
 #include "Sites.h"
 
@@ -2108,6 +2109,91 @@ struct ImproverUi
 };
 ImproverUi g_impUi;
 
+//------------------------------------------------------------------ export en plugin FFGL autonome
+struct ExportUi
+{
+	std::string name, folder;
+	bool source = false, useCurrent = true;
+	uint64_t seenSerial = 0;
+	bool waiting = false;
+};
+ExportUi g_exportUi;
+
+void ExportPluginPopup( const SharedPtr& t, const ShaderDoc& base, bool open )
+{
+	// résultat de l'export (fait par le thread de rendu puis un thread de travail)
+	if( t && g_exportUi.waiting )
+	{
+		std::lock_guard< std::mutex > lock( t->m );
+		if( t->exportSerial != g_exportUi.seenSerial )
+		{
+			g_exportUi.seenSerial = t->exportSerial;
+			g_exportUi.waiting    = false;
+			Toast( t->exportResult + ( t->exportOk ? "  —  redémarre Resolume pour le voir dans la liste des effets." : "" ) );
+		}
+	}
+	if( open )
+	{
+		g_exportUi.name = base.title.substr( 0, 16 );
+		bool usesInput  = false;
+		for( auto& p : base.passes )
+			for( auto& c : p.ch )
+				usesInput = usesInput || c.kind == ChannelKind::Input;
+		g_exportUi.source = !usesInput;
+		if( g_exportUi.folder.empty() )
+			g_exportUi.folder = standalone::ModuleDir();
+		ImGui::OpenPopup( "Exporter en plugin FFGL" );
+	}
+	ImGui::SetNextWindowSize( ImVec2( ImGui::GetFontSize() * 34, 0 ), ImGuiCond_Appearing );
+	if( !ImGui::BeginPopupModal( "Exporter en plugin FFGL", nullptr, ImGuiWindowFlags_NoSavedSettings ) )
+		return;
+	ImGui::TextWrapped( "Crée une DLL FFGL autonome avec ce shader intégré : elle apparaît dans Resolume sous son propre nom, "
+						"avec les sliders du shader, sans passer par Shader Loader." );
+	ImGui::Spacing();
+	ImGui::SetNextItemWidth( ImGui::GetFontSize() * 12 );
+	ImGui::InputText( "Nom dans Resolume", &g_exportUi.name );
+	if( g_exportUi.name.size() > 16 )
+		g_exportUi.name.resize( 16 );
+	ImGui::SameLine();
+	ImGui::TextDisabled( "(16 car. max)" );
+	if( ImGui::RadioButton( "Effet (reçoit le clip)", !g_exportUi.source ) )
+		g_exportUi.source = false;
+	ImGui::SameLine();
+	if( ImGui::RadioButton( "Source (génère l'image)", g_exportUi.source ) )
+		g_exportUi.source = true;
+	ImGui::Checkbox( "Réglages actuels des sliders comme valeurs par défaut", &g_exportUi.useCurrent );
+	ImGui::SetNextItemWidth( -1 );
+	ImGui::InputText( "##efolder", &g_exportUi.folder );
+	ImGui::TextDisabled( "Dossier : par défaut celui de Shader Loader, que Resolume scanne déjà." );
+	std::string file = JoinPath( g_exportUi.folder, SanitizeFileName( "Shader Loader - " + Trim( g_exportUi.name ) ) + ".dll" );
+	ImGui::TextDisabled( "Fichier : %s", file.c_str() );
+	ImGui::TextDisabled( "Identifiant FFGL : %s", standalone::MakePluginId( Trim( g_exportUi.name ) ).c_str() );
+	LicenseInfo li = LicenseForFile( base.sourcePath );
+	if( !base.sourcePath.empty() && !LicenseAllowsCommercial( li.kind ) )
+		ImGui::TextColored( ImVec4( 1, 0.6f, 0.3f, 1 ), "Licence du shader : %s — respecte-la si tu diffuses ce plugin.", li.label.c_str() );
+	if( base.IsShadered() )
+		ImGui::TextColored( ImVec4( 1, 0.45f, 0.45f, 1 ), "Les projets SHADERed / Godot ne peuvent pas être exportés." );
+	ImGui::Spacing();
+	ImGui::BeginDisabled( !t || base.IsShadered() || Trim( g_exportUi.name ).empty() || g_exportUi.waiting );
+	if( ImGui::Button( "Exporter" ) )
+	{
+		MakeDirs( g_exportUi.folder );
+		{
+			std::lock_guard< std::mutex > lock( t->m );
+			g_exportUi.seenSerial = t->exportSerial;
+		}
+		g_exportUi.waiting = true;
+		RequestExportPlugin( t, Trim( g_exportUi.name ), file, g_exportUi.source, g_exportUi.useCurrent );
+		Toast( "Export en cours…" );
+		ImGui::CloseCurrentPopup();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	if( ImGui::Button( "Annuler##export" ) )
+		ImGui::CloseCurrentPopup();
+	ImGui::EndPopup();
+}
+
 ShaderDoc EditedDoc()
 {
 	ShaderDoc doc = *g_ui->editorBase;
@@ -2166,6 +2252,8 @@ void TabEditor( const InstanceSnapshot& snap )
 		g_ui->editorDirty      = false;
 		g_ui->editorDocVersion = (uint64_t)-1;
 	}
+	ImGui::SameLine();
+	bool openExport = ImGui::Button( "Exporter en plugin FFGL…" );
 	if( g_ui->editorDirty )
 	{
 		ImGui::SameLine();
@@ -2173,6 +2261,7 @@ void TabEditor( const InstanceSnapshot& snap )
 	}
 
 	SharedPtr t = Target();
+	ExportPluginPopup( t, base, openExport );
 	if( apply && t )
 		RequestApplyDoc( t, EditedDoc(), false );
 	if( save && t )

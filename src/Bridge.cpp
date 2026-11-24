@@ -372,7 +372,9 @@ void Start()
 #else
 		const wchar_t* kind = L"effect";
 #endif
-		std::wstring name = L"\\\\.\\pipe\\ShaderLoaderBridge-" + std::to_wstring( GetCurrentProcessId() ) + L"-" + kind;
+		wchar_t mod[ 32 ];
+		swprintf( mod, 32, L"%llx", (unsigned long long)(uintptr_t)&Start );
+		std::wstring name = L"\\\\.\\pipe\\ShaderLoaderBridge-" + std::to_wstring( GetCurrentProcessId() ) + L"-" + kind + L"-" + mod;
 		std::thread( ServeLoop, name ).detach();
 	} );
 #endif
