@@ -444,6 +444,8 @@ Settings GetSettings()
 				s_settings.shaderAlpha     = j.value( "shaderAlpha", false );
 				s_settings.watchDownloads  = j.value( "watchDownloads", true );
 				s_settings.autoLoadDownloads = j.value( "autoLoadDownloads", true );
+				s_settings.claudeKey         = j.value( "claudeKey", std::string() );
+				s_settings.claudeModel       = j.value( "claudeModel", std::string( "claude-sonnet-5-5" ) );
 			}
 		}
 	}
@@ -463,6 +465,8 @@ void SaveSettings( const Settings& s )
 	j[ "shaderAlpha" ]     = s.shaderAlpha;
 	j[ "watchDownloads" ]  = s.watchDownloads;
 	j[ "autoLoadDownloads" ] = s.autoLoadDownloads;
+	j[ "claudeKey" ]         = s.claudeKey;
+	j[ "claudeModel" ]       = s.claudeModel;
 	WriteFileText( SettingsPath(), j.dump( 2 ) );
 }
 

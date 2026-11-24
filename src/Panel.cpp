@@ -5,6 +5,7 @@
 #include "Net.h"
 #include "License.h"
 #include "Preview.h"
+#include "Claude.h"
 #include "sed/SedArchive.h"
 #include "Sites.h"
 
@@ -2061,6 +2062,28 @@ void SyncEditor( const InstanceSnapshot& snap )
 	g_ui->editorSelectImage = true;
 }
 
+//------------------------------------------------------------------ améliorateur (API Claude)
+struct ImproverState
+{
+	std::mutex m;
+	bool running = false;
+	std::string progress;
+	bool hasResult = false;
+	claude::Result result;
+	std::atomic< bool > cancel{ false };
+};
+ImproverState g_improver;
+
+struct ImproverUi
+{
+	std::string prompt;
+	bool hasUndo = false;
+	std::string undoCommon;
+	std::vector< std::string > undoPasses;
+	std::string lastSummary, lastError, lastLog;
+};
+ImproverUi g_impUi;
+
 ShaderDoc EditedDoc()
 {
 	ShaderDoc doc = *g_ui->editorBase;
@@ -2201,6 +2224,153 @@ void TabEditor( const InstanceSnapshot& snap )
 		}
 	}
 
+	// améliorer le shader avec une consigne (API Claude)
+	{
+		bool running;
+		std::string progress;
+		bool hasResult;
+		{
+			std::lock_guard< std::mutex > lock( g_improver.m );
+			running   = g_improver.running;
+			progress  = g_improver.progress;
+			hasResult = g_improver.hasResult;
+		}
+		if( hasResult )
+		{
+			claude::Result r;
+			{
+				std::lock_guard< std::mutex > lock( g_improver.m );
+				r                     = g_improver.result;
+				g_improver.hasResult  = false;
+			}
+			g_impUi.lastError   = r.ok ? r.error : r.error;
+			g_impUi.lastSummary = r.ok ? r.summary : std::string();
+			g_impUi.lastLog     = r.compileLog;
+			if( r.ok && r.doc.passes.size() == g_ui->editPasses.size() )
+			{
+				g_impUi.undoCommon = g_ui->editCommon;
+				g_impUi.undoPasses = g_ui->editPasses;
+				g_impUi.hasUndo    = true;
+				g_ui->editCommon   = r.doc.common;
+				for( size_t i = 0; i < r.doc.passes.size(); ++i )
+					g_ui->editPasses[ i ] = r.doc.passes[ i ].code;
+				g_ui->editorDirty = true;
+				if( t )
+					RequestApplyDoc( t, EditedDoc(), false );
+				Toast( r.compileLog.empty() ? "Shader amélioré par Claude (pas encore enregistré)." : "Résultat de Claude appliqué, mais il ne compile pas." );
+			}
+		}
+		if( ImGui::CollapsingHeader( "Améliorer avec Claude###improve", ImGuiTreeNodeFlags_DefaultOpen ) )
+		{
+			Settings& st = g_ui->settings;
+			if( Trim( st.claudeKey ).empty() )
+			{
+				ImGui::TextColored( ImVec4( 1, 0.75f, 0.3f, 1 ), "Ajoute ta clé API Claude dans l'onglet PRÉFÉRENCES." );
+			}
+			ImGui::TextDisabled( "Décris ce qu'il faut changer : Claude réécrit le shader, Shader Loader vérifie qu'il compile (et le fait corriger sinon), puis l'applique." );
+			ImGui::InputTextMultiline( "##iprompt", &g_impUi.prompt, ImVec2( -1, ImGui::GetTextLineHeight() * 3.6f ) );
+			if( g_impUi.prompt.empty() && !ImGui::IsItemActive() )
+			{
+				ImVec2 r0 = ImGui::GetItemRectMin();
+				ImGui::GetWindowDrawList()->AddText( ImVec2( r0.x + 6, r0.y + 4 ), IM_COL32( 130, 130, 130, 255 ),
+													 "ex. : plus de contraste, réagit aux basses du son, ajoute des sliders pour la vitesse et la couleur…" );
+			}
+			const auto& models = claude::Models();
+			int mi             = 0;
+			for( int i = 0; i < (int)models.size(); ++i )
+				if( st.claudeModel == models[ i ].id )
+					mi = i;
+			ImGui::SetNextItemWidth( ImGui::GetFontSize() * 15 );
+			if( ImGui::BeginCombo( "##imodel", models[ mi ].label ) )
+			{
+				for( int i = 0; i < (int)models.size(); ++i )
+					if( ImGui::Selectable( models[ i ].label, i == mi ) )
+					{
+						st.claudeModel = models[ i ].id;
+						SaveSettings( st );
+					}
+				ImGui::EndCombo();
+			}
+			ImGui::SameLine();
+			ImGui::BeginDisabled( running || Trim( g_impUi.prompt ).empty() || Trim( st.claudeKey ).empty() );
+			if( ImGui::Button( "Améliorer" ) )
+			{
+				ShaderDoc doc         = EditedDoc();
+				std::string key       = st.claudeKey, model = st.claudeModel, prompt = g_impUi.prompt;
+				g_impUi.lastError.clear();
+				g_impUi.lastSummary.clear();
+				g_impUi.lastLog.clear();
+				{
+					std::lock_guard< std::mutex > lock( g_improver.m );
+					g_improver.running   = true;
+					g_improver.progress  = "Envoi à Claude…";
+					g_improver.hasResult = false;
+				}
+				g_improver.cancel = false;
+				std::thread( [ doc, key, model, prompt ] {
+					claude::Result r;
+					try
+					{
+						r = claude::Improve( key, model, prompt, doc,
+											 []( const std::string& msg ) {
+												 std::lock_guard< std::mutex > lock( g_improver.m );
+												 g_improver.progress = msg;
+												 if( HWND hwnd = g_hwnd.load() )
+													 PostMessageW( hwnd, WM_STFX_WAKE, 0, 0 );
+											 },
+											 g_improver.cancel );
+					}
+					catch( ... )
+					{
+						r.ok    = false;
+						r.error = "erreur inattendue";
+					}
+					{
+						std::lock_guard< std::mutex > lock( g_improver.m );
+						g_improver.result    = r;
+						g_improver.hasResult = true;
+						g_improver.running   = false;
+					}
+					if( HWND hwnd = g_hwnd.load() )
+						PostMessageW( hwnd, WM_STFX_WAKE, 0, 0 );
+				} ).detach();
+			}
+			ImGui::EndDisabled();
+			if( running )
+			{
+				ImGui::SameLine();
+				if( ImGui::Button( "Arrêter" ) )
+					g_improver.cancel = true;
+				ImGui::SameLine();
+				ImGui::TextDisabled( "%s", progress.c_str() );
+			}
+			ImGui::SameLine();
+			ImGui::BeginDisabled( !g_impUi.hasUndo || running );
+			if( ImGui::Button( "Annuler l'amélioration" ) )
+			{
+				g_ui->editCommon = g_impUi.undoCommon;
+				if( g_impUi.undoPasses.size() == g_ui->editPasses.size() )
+					g_ui->editPasses = g_impUi.undoPasses;
+				g_impUi.hasUndo   = false;
+				g_ui->editorDirty = true;
+				if( t )
+					RequestApplyDoc( t, EditedDoc(), false );
+			}
+			ImGui::EndDisabled();
+			if( !g_impUi.lastSummary.empty() )
+				ImGui::TextWrapped( "Claude : %s", g_impUi.lastSummary.c_str() );
+			if( !g_impUi.lastError.empty() )
+				ImGui::TextColored( ImVec4( 1, 0.45f, 0.45f, 1 ), "%s", g_impUi.lastError.c_str() );
+			if( !g_impUi.lastLog.empty() && ImGui::TreeNode( "Erreurs de compilation restantes" ) )
+			{
+				ImGui::TextWrapped( "%s", g_impUi.lastLog.c_str() );
+				ImGui::TreePop();
+			}
+			if( g_impUi.hasUndo && !running )
+				ImGui::TextDisabled( "Le résultat est appliqué en direct. « Enregistrer » pour le garder, « Annuler l'amélioration » pour revenir en arrière." );
+		}
+	}
+
 	if( ImGui::BeginTabBar( "passes" ) )
 	{
 		ImGui::PushFont( g_ui->codeFont, 0.0f );
@@ -2250,6 +2420,15 @@ void TabPrefs()
 
 	ImGui::TextDisabled( "Facultative : sans clé, utilise le bookmarklet (onglet SHADERTOY)." );
 
+	ImGui::SeparatorText( "Clé API Claude (améliorateur de shaders)" );
+	ImGui::TextWrapped( "Pour le bouton « Améliorer avec Claude » de l'onglet ÉDITEUR. Crée une clé sur la console Anthropic ; "
+						"chaque amélioration est facturée sur ton compte Anthropic (quelques centimes selon le modèle et la taille du shader)." );
+	ImGui::SetNextItemWidth( ImGui::GetFontSize() * 16 );
+	ImGui::InputText( "##ckey", &st.claudeKey, g_ui->showKey ? 0 : ImGuiInputTextFlags_Password );
+	ImGui::SameLine();
+	if( ImGui::Button( "Créer une clé Claude…" ) )
+		OpenUrl( "https://console.anthropic.com/settings/keys" );
+
 	ImGui::SeparatorText( "Import depuis le navigateur" );
 	ImGui::Checkbox( "Surveiller le dossier Téléchargements", &st.watchDownloads );
 	ImGui::SameLine();
@@ -2282,7 +2461,8 @@ void TabPrefs()
 	ImGui::Spacing();
 	if( ImGui::Button( "Enregistrer les préférences" ) )
 	{
-		st.apiKey = Trim( st.apiKey );
+		st.apiKey    = Trim( st.apiKey );
+		st.claudeKey = Trim( st.claudeKey );
 		SaveSettings( st );
 		Toast( "Préférences enregistrées." );
 	}

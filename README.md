@@ -144,6 +144,17 @@ Un seul favori suffit pour importer depuis six sites. Pas besoin d'extension Fir
 
 Les fichiers `.frag` / `.glsl` avec `void main()` (style The Book of Shaders, GLSLSandbox, GLSL ES 3 avec `out vec4`) sont aussi convertis automatiquement quand tu les ouvres dans l'onglet FICHIER.
 
+## Améliorer un shader avec Claude
+
+Dans l'onglet **ÉDITEUR**, la rubrique **Améliorer avec Claude** réécrit le shader chargé à partir d'une consigne (« plus de contraste », « réagit aux basses », « ajoute des sliders pour la vitesse et la couleur »…).
+
+1. Ajoute ta clé API Anthropic dans **PRÉFÉRENCES** (bouton *Créer une clé Claude…*). Chaque amélioration est facturée sur ton compte Anthropic.
+2. Écris la consigne, choisis le modèle (Sonnet : rapide ; Opus : le plus capable ; Haiku : économique), puis clique **Améliorer**.
+3. Shader Loader vérifie que le résultat compile. Sinon, il renvoie les erreurs à Claude, qui corrige (jusqu'à 2 fois).
+4. Le résultat s'applique en direct dans Resolume. **Enregistrer** pour le garder, **Annuler l'amélioration** pour revenir en arrière.
+
+Claude garde les passes et le branchement des iChannels ; les nouveaux réglages qu'il ajoute (`#define`, `const`, `uniform … // min max défaut`) deviennent des sliders. Pas pour les projets SHADERed ni les shaders Godot.
+
 ## Projets SHADERed et shaders Godot
 
 Shader Loader exécute les projets [SHADERed](https://shadered.org) avec le même moteur que SHADERed : passes de rendu et compute, géométries (cube, sphère, plan, quad plein écran…), modèles `.obj`, render textures, états de rendu (fusion, profondeur, stencil, fil de fer), instanciation, buffers, cubemaps, tessellation et geometry shaders, variables système (`Time`, `ViewportSize`, `MousePosition`, matrices de caméra…) et fonctions.

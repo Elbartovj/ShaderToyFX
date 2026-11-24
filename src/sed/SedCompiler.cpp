@@ -494,5 +494,20 @@ StageResult CompileStage( const std::string& path, Stage stage, const std::strin
 	}
 	return CompileStageSource( src, LangFromPath( path, src ), path, stage, entry, macros, includeDirs, gsUsed, tsUsed );
 }
+bool ValidateGlsl( const std::string& source, std::string& log )
+{
+	std::lock_guard< std::mutex > lock( g_glslangMutex );
+	EnsureGlslang();
+	glslang::TShader shader( EShLangFragment );
+	const char* src = source.c_str();
+	shader.setStrings( &src, 1 );
+	shader.setEnvInput( glslang::EShSourceGlsl, EShLangFragment, glslang::EShClientNone, 410 );
+	shader.setEnvClient( glslang::EShClientNone, glslang::EShTargetClientVersion( 0 ) );
+	shader.setEnvTarget( glslang::EShTargetNone, glslang::EShTargetLanguageVersion( 0 ) );
+	bool ok = shader.parse( GetDefaultResources(), 410, false, EShMsgDefault );
+	log     = shader.getInfoLog();
+	return ok;
+}
+
 }//namespace sed
 }//namespace stfx

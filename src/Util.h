@@ -68,6 +68,8 @@ struct Settings
 	bool shaderAlpha      = false;
 	bool watchDownloads   = true;// importe les "Titre [id].json" exportés par le bookmarklet
 	bool autoLoadDownloads = true;// et les charge directement dans l'instance ciblée
+	std::string claudeKey;// clé API Anthropic (améliorateur de shaders)
+	std::string claudeModel = "claude-sonnet-5-5";
 };
 Settings GetSettings();
 void SaveSettings( const Settings& s );

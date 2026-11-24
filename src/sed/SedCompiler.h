@@ -36,5 +36,7 @@ std::vector< std::string > SamplerOrder( const std::string& glsl );
 
 // Explication pour les langages qui demandent un compilateur externe (Rust, C++, Slang)
 std::string ExternalCompilerMessage( Lang lang );
+// Vérifie qu'un fragment shader GLSL compile (glslang, sans SPIR-V). log : erreurs.
+bool ValidateGlsl( const std::string& source, std::string& log );
 }//namespace sed
 }//namespace stfx
