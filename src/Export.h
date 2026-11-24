@@ -5,6 +5,7 @@
 #pragma once
 #include "ShaderDoc.h"
 #include <string>
+#include <vector>
 
 namespace stfx
 {
@@ -18,6 +19,7 @@ struct Payload
 	bool source = false;    // source (sans entrée) ou effet
 	std::string description;
 	std::string docPath;
+	std::vector< std::string > paramNames;// noms des sliders du shader, connus dès le chargement
 };
 // Bloc de données de la DLL en cours (lu une fois, au chargement : nom, identifiant, type)
 const Payload& Get();

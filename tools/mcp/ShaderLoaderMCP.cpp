@@ -21,7 +21,7 @@ using json = nlohmann::json;
 
 namespace
 {
-const char* kVersion = "1.25.0";
+const char* kVersion = "1.25.1";
 
 const char* kInstructions = R"(Shader Loader runs Shadertoy-format GLSL shaders as effects and sources inside Resolume Arena (VJ software). These tools read and edit the shader loaded in a Shader Loader instance; changes compile and appear live in Resolume.
 

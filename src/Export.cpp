@@ -114,6 +114,10 @@ Payload Load()
 	p.id          = j.value( "id", std::string( "SLXX" ) ).substr( 0, 4 );
 	p.source      = j.value( "type", std::string( "effect" ) ) == "source";
 	p.description = j.value( "description", std::string() );
+	if( j.contains( "params" ) && j[ "params" ].is_array() )
+		for( auto& n : j[ "params" ] )
+			if( n.is_string() )
+				p.paramNames.push_back( n.get< std::string >() );
 	return p;
 }
 
@@ -269,6 +273,11 @@ bool WritePlugin( const ShaderDoc& docIn, const ExportOptions& opt, std::string&
 	bin.resize( (size_t)codeSize );
 
 	ShaderDoc doc = docIn;
+	if( doc.params.empty() )
+		ExtractUserParams( doc );
+	json params = json::array();
+	for( auto& up : doc.params )
+		params.push_back( up.name );
 	std::string ext;
 	std::string text = SerializeDoc( doc, ext );
 	json media       = json::object();
@@ -291,6 +300,7 @@ bool WritePlugin( const ShaderDoc& docIn, const ExportOptions& opt, std::string&
 			   { "description", "Shader Loader : " + doc.title + ( doc.author.empty() ? "" : " par " + doc.author ) },
 			   { "ext", ext },
 			   { "doc", text },
+			   { "params", params },
 			   { "media", media } };
 	std::string payload = j.dump( -1, ' ', false, json::error_handler_t::replace );
 	uint64_t len        = payload.size();

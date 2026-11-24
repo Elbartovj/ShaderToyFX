@@ -2088,6 +2088,23 @@ std::string FindMcpbBundle()
 	return {};
 }
 
+// Montre le .mcpb dans l'Explorateur : Claude Desktop l'installe par glisser-déposer dans
+// Paramètres > Application de bureau > Extensions (le double-clic ne l'ouvre pas toujours)
+static void ShowMcpbInstall()
+{
+	std::string bundle = FindMcpbBundle();
+	if( bundle.empty() )
+	{
+		Toast( "Fichier « Shader Loader pour Claude Desktop.mcpb » introuvable : il est dans le zip de Shader Loader. "
+			   "Glisse-le dans Claude Desktop > Paramètres > Application de bureau > Extensions." );
+		return;
+	}
+	std::wstring args = L"/select,\"" + Widen( bundle ) + L"\"";
+	ShellExecuteW( nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL );
+	Toast( "Glisse le fichier sélectionné dans Claude Desktop > Paramètres > Application de bureau > Extensions, "
+		   "puis active l'extension Shader Loader." );
+}
+
 //------------------------------------------------------------------ améliorateur (API Claude)
 struct ImproverState
 {
@@ -2414,19 +2431,11 @@ void TabEditor( const InstanceSnapshot& snap )
 			}
 			ImGui::SameLine();
 			if( ImGui::SmallButton( "ou extension .mcpb…" ) )
-			{
-				std::string bundle = FindMcpbBundle();
-				if( !bundle.empty() )
-				{
-					ShellExecuteW( nullptr, L"open", Widen( bundle ).c_str(), nullptr, nullptr, SW_SHOWNORMAL );
-					Toast( "Claude Desktop va proposer d'installer l'extension Shader Loader." );
-				}
-				else
-					Toast( "Double-clique « Shader Loader pour Claude Desktop.mcpb » (dans le zip de Shader Loader)." );
-			}
+				ShowMcpbInstall();
 			if( ImGui::BeginItemTooltip() )
 			{
-				ImGui::TextUnformatted( "Une fois l'extension installée dans Claude Desktop (Paramètres > Extensions), demande simplement à Claude\n"
+				ImGui::TextUnformatted( "Montre le fichier .mcpb : glisse-le dans Claude Desktop > Paramètres > Application de bureau > Extensions.\n"
+										"Une fois l'extension installée, demande simplement à Claude\n"
 										"d'améliorer l'effet chargé dans Shader Loader : il lit le shader de l'instance sélectionnée ici,\n"
 										"applique ses changements en direct dans Resolume et peut capturer le rendu pour le vérifier.\n"
 										"Utilise ton abonnement Claude, sans clé API. Tout reste sur cet ordinateur." );
@@ -2588,14 +2597,16 @@ void TabPrefs()
 	ImGui::TextDisabled( "Facultative : sans clé, utilise le bookmarklet (onglet SHADERTOY)." );
 
 	ImGui::SeparatorText( "Claude Desktop (améliorateur de shaders, sans clé API)" );
-	if( ImGui::Button( "Connecter à Claude Desktop##prefs" ) )
+	if( ImGui::Button( "Installer l'extension (.mcpb)…##prefs" ) )
+		ShowMcpbInstall();
+	ImGui::SameLine();
+	ImGui::TextDisabled( "glisse le fichier dans Paramètres > Application de bureau > Extensions" );
+	if( ImGui::SmallButton( "ou écrire la config (claude_desktop_config.json)##prefs" ) )
 	{
 		std::string msg;
 		claudedesktop::Connect( msg );
 		Toast( msg );
 	}
-	ImGui::SameLine();
-	ImGui::TextDisabled( "puis quitte et rouvre Claude Desktop" );
 
 	ImGui::SeparatorText( "Clé API Claude (améliorateur de shaders)" );
 	ImGui::TextWrapped( "Pour le bouton « Améliorer avec Claude » de l'onglet ÉDITEUR. Crée une clé sur la console Anthropic ; "

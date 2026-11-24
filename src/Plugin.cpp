@@ -124,10 +124,13 @@ ShaderToyFX::ShaderToyFX()
 	for( unsigned int i = 0; i < (unsigned)kMaxUserParams; ++i )
 	{
 		unsigned int idx = PT_USER0 + i;
-		std::string name = "Param " + std::to_string( i + 1 );
+		// plugin exporté : les vrais noms dès la déclaration (Resolume garde ceux-là)
+		const auto& names = standalone::Get().paramNames;
+		bool known        = kStandalone && i < names.size();
+		std::string name  = known ? names[ i ] : "Param " + std::to_string( i + 1 );
 		SetParamInfo( idx, name.c_str(), FF_TYPE_STANDARD, 0.5f );
 		SetParamGroup( idx, "Shader Params" );
-		SetParamVisibility( idx, false, false );
+		SetParamVisibility( idx, known, false );
 	}
 
 	values[ PT_SPEED ]      = 0.25f;
