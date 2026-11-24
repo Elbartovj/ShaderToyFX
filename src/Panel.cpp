@@ -7,6 +7,7 @@
 #include "Preview.h"
 #include "Claude.h"
 #include "Export.h"
+#include "ClaudeDesktop.h"
 #include "sed/SedArchive.h"
 #include "Sites.h"
 
@@ -2398,7 +2399,21 @@ void TabEditor( const InstanceSnapshot& snap )
 				Toast( "Demande copiée : colle-la dans Claude Desktop." );
 			}
 			ImGui::SameLine();
-			if( ImGui::Button( "Installer l'extension…" ) )
+			if( ImGui::Button( "Connecter à Claude Desktop" ) )
+			{
+				std::string msg;
+				claudedesktop::Connect( msg );
+				Toast( msg );
+			}
+			if( ImGui::BeginItemTooltip() )
+			{
+				ImGui::TextUnformatted( "Installe le serveur Shader Loader et l'ajoute à la configuration de Claude Desktop\n"
+										"(claude_desktop_config.json, une copie .bak est gardée). Ensuite, quitte complètement Claude Desktop\n"
+										"(icône près de l'horloge > Quitter) et rouvre-le : les outils Shader Loader apparaissent dans le menu des outils." );
+				ImGui::EndTooltip();
+			}
+			ImGui::SameLine();
+			if( ImGui::SmallButton( "ou extension .mcpb…" ) )
 			{
 				std::string bundle = FindMcpbBundle();
 				if( !bundle.empty() )
@@ -2571,6 +2586,16 @@ void TabPrefs()
 		OpenUrl( "https://www.shadertoy.com/myapps" );
 
 	ImGui::TextDisabled( "Facultative : sans clé, utilise le bookmarklet (onglet SHADERTOY)." );
+
+	ImGui::SeparatorText( "Claude Desktop (améliorateur de shaders, sans clé API)" );
+	if( ImGui::Button( "Connecter à Claude Desktop##prefs" ) )
+	{
+		std::string msg;
+		claudedesktop::Connect( msg );
+		Toast( msg );
+	}
+	ImGui::SameLine();
+	ImGui::TextDisabled( "puis quitte et rouvre Claude Desktop" );
 
 	ImGui::SeparatorText( "Clé API Claude (améliorateur de shaders)" );
 	ImGui::TextWrapped( "Pour le bouton « Améliorer avec Claude » de l'onglet ÉDITEUR. Crée une clé sur la console Anthropic ; "

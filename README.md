@@ -159,7 +159,7 @@ Onglet **ÉDITEUR** → **Exporter en plugin FFGL…** : crée une DLL qui conti
 
 ### Avec Claude Desktop (ton abonnement Claude, sans clé API)
 
-1. Double-clique **`Shader Loader pour Claude Desktop.mcpb`** (dans le zip) : Claude Desktop propose d'installer l'extension. Clique *Installer*. (Ou bouton *Installer l'extension…* dans l'onglet ÉDITEUR.)
+1. Onglet **ÉDITEUR** (ou PRÉFÉRENCES) → **Connecter à Claude Desktop**, puis quitte complètement Claude Desktop (icône près de l'horloge → *Quitter*) et rouvre-le. Le bouton copie le petit serveur Shader Loader dans `%APPDATA%\ShaderToyFX` et l'ajoute à `claude_desktop_config.json` (une copie `.bak` est gardée). Autre possibilité : double-cliquer **`Shader Loader pour Claude Desktop.mcpb`** (dans le zip) pour l'installer comme extension.
 2. Dans Resolume, charge l'effet ou la source Shader Loader. Si tu en as plusieurs, sélectionne l'instance voulue dans le panneau.
 3. Dans Claude Desktop, demande par exemple : « Améliore l'effet chargé dans Shader Loader : réagit aux basses, plus saturé, ajoute des sliders vitesse et couleur ». Le bouton *Copier la demande* de l'ÉDITEUR prépare ce message.
 

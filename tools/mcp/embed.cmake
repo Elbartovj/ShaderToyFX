@@ -1,0 +1,6 @@
+# Génère un .cpp contenant ShaderLoaderMCP.exe (intégré à la DLL pour « Connecter à Claude Desktop »)
+file(READ "${IN}" hex HEX)
+string(LENGTH "${hex}" len)
+math(EXPR size "${len} / 2")
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," bytes "${hex}")
+file(WRITE "${OUT}" "// généré par tools/mcp/embed.cmake\n#include <cstddef>\nextern const unsigned char kMcpExe[] = {${bytes}};\nextern const size_t kMcpExeSize = ${size};\n")

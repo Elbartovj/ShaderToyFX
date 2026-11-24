@@ -82,10 +82,25 @@ else()
     target_compile_options(godot_shader PRIVATE -w)
 endif()
 
+# ---- serveur MCP pour Claude Desktop : exécutable séparé, intégré aussi dans la DLL
+add_executable(ShaderLoaderMCP tools/mcp/ShaderLoaderMCP.cpp)
+target_include_directories(ShaderLoaderMCP PRIVATE ${TP}/nlohmann/.. ${TP})
+if(MINGW)
+    target_link_options(ShaderLoaderMCP PRIVATE -static -static-libgcc -static-libstdc++ -s)
+endif()
+if(MSVC)
+    set_property(TARGET ShaderLoaderMCP PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
+endif()
+set(MCP_BLOB ${CMAKE_CURRENT_BINARY_DIR}/McpExeBlob.cpp)
+add_custom_command(OUTPUT ${MCP_BLOB}
+    COMMAND ${CMAKE_COMMAND} -DIN=$<TARGET_FILE:ShaderLoaderMCP> -DOUT=${MCP_BLOB} -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/mcp/embed.cmake
+    DEPENDS ShaderLoaderMCP ${CMAKE_CURRENT_SOURCE_DIR}/tools/mcp/embed.cmake
+    COMMENT "Intégration de ShaderLoaderMCP.exe")
+
 # ---- code commun
 set(STFX_SOURCES
     src/Util.cpp src/License.cpp src/Net.cpp src/ShaderDoc.cpp src/Params.cpp src/ShadertoyApi.cpp src/GlslGen.cpp
-    src/Renderer.cpp src/Sites.cpp src/SitesWeb.cpp src/Claude.cpp src/Bridge.cpp src/Export.cpp src/Instance.cpp src/Panel.cpp src/Preview.cpp src/Plugin.cpp src/StbImpl.cpp
+    src/Renderer.cpp src/Sites.cpp src/SitesWeb.cpp src/Claude.cpp src/Bridge.cpp src/Export.cpp src/ClaudeDesktop.cpp ${MCP_BLOB} src/Instance.cpp src/Panel.cpp src/Preview.cpp src/Plugin.cpp src/StbImpl.cpp
     src/sed/SedProject.cpp src/sed/SedCompiler.cpp src/sed/SedGeometry.cpp src/sed/SedRenderer.cpp src/sed/SedGodot.cpp
     src/sed/SedArchive.cpp)
 
@@ -105,11 +120,3 @@ stfx_plugin(ShaderToyFX_Effect ShaderLoader)
 stfx_plugin(ShaderToyFX_Source ShaderLoader_Source)
 target_compile_definitions(ShaderToyFX_Source PRIVATE STFX_SOURCE)
 
-# ---- serveur MCP pour Claude Desktop (extension .mcpb)
-if(WIN32)
-    add_executable(ShaderLoaderMCP tools/mcp/ShaderLoaderMCP.cpp)
-    target_include_directories(ShaderLoaderMCP PRIVATE ${TP}/nlohmann/.. ${TP})
-    if(MINGW)
-        target_link_options(ShaderLoaderMCP PRIVATE -static -static-libgcc -static-libstdc++ -s)
-    endif()
-endif()
