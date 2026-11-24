@@ -725,7 +725,15 @@ void StartWebImport( const std::string& site, const std::string& id, const std::
 	std::thread( [ site, id, label ] {
 		WebJobResult r;
 		r.label = label;
-		r.ok    = sites::FetchAndImport( site, id, r.path, r.title, r.err );
+		try
+		{
+			r.ok = sites::FetchAndImport( site, id, r.path, r.title, r.err );
+		}
+		catch( ... )
+		{
+			r.ok  = false;
+			r.err = "erreur inattendue";
+		}
 		{
 			std::lock_guard< std::mutex > lock( g_webJobMutex );
 			g_webJobDone.push_back( r );
@@ -779,7 +787,15 @@ WebPreview RequestWebPreview( const std::string& site, const std::string& id )
 	g_webPreviews[ key ] = WebPreview();
 	std::thread( [ site, id, key ] {
 		WebPreview r;
-		r.state = sites::FetchForPreview( site, id, r.path, r.err ) ? 1 : 2;
+		try
+		{
+			r.state = sites::FetchForPreview( site, id, r.path, r.err ) ? 1 : 2;
+		}
+		catch( ... )
+		{
+			r.state = 2;
+			r.err   = "erreur inattendue";
+		}
 		{
 			std::lock_guard< std::mutex > lock( g_webPreviewMutex );
 			g_webPreviews[ key ] = r;
@@ -830,7 +846,15 @@ void StartWebBrowse()
 	std::thread( [ = ] {
 		std::vector< sites::WebEntry > out;
 		std::string next, err;
-		bool ok = sites::Browse( site, query, sortIdx, cursor, out, next, err );
+		bool ok = false;
+		try
+		{
+			ok = sites::Browse( site, query, sortIdx, cursor, out, next, err );
+		}
+		catch( ... )
+		{
+			err = "erreur inattendue";
+		}
 		std::lock_guard< std::mutex > lock( g_webBrowse.m );
 		if( gen != g_webBrowse.gen )
 			return;

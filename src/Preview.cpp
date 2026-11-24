@@ -259,7 +259,20 @@ void ThreadMain()
 			SetStatus( path, true, "" );
 			ShaderDoc doc;
 			std::string err;
-			if( !LoadShaderFile( path, doc, err ) )
+			bool loaded = false;
+			try
+			{
+				loaded = LoadShaderFile( path, doc, err );
+			}
+			catch( const std::exception& e )
+			{
+				err = e.what();
+			}
+			catch( ... )
+			{
+				err = "fichier illisible";
+			}
+			if( !loaded )
 				SetStatus( path, false, err.empty() ? "Lecture impossible." : err );
 			else
 			{

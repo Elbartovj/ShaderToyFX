@@ -168,17 +168,16 @@ bool Between( const std::string& s, const std::string& a, const std::string& b, 
 	return true;
 }
 
-thread_local std::string t_previewDir;// non vide : conversion pour l'aperçu (cache), pas pour la bibliothèque
-
-bool FinishImport( const std::string& site, const std::string& id, const json& bundle, std::string& savedPath, std::string& title, std::string& err )
+bool FinishImport( const std::string& site, const std::string& id, const json& bundle, std::string& savedPath, std::string& title, std::string& err,
+				   const std::string& previewDir )
 {
 	std::string out, siteDir;
 	if( !ConvertBundle( bundle.dump(), out, title, siteDir, err ) )
 		return false;
-	if( !t_previewDir.empty() )
+	if( !previewDir.empty() )
 	{
-		MakeDirs( t_previewDir );
-		savedPath = JoinPath( t_previewDir, SanitizeFileName( site + "-" + id ) + ".json" );
+		MakeDirs( previewDir );
+		savedPath = JoinPath( previewDir, SanitizeFileName( site + "-" + id ) + ".json" );
 		if( !WriteFileText( savedPath, out ) )
 		{
 			err = "écriture impossible : " + savedPath;
@@ -259,7 +258,7 @@ bool ShaderKitFromHtml( const std::string& html, const std::string& id, json& bu
 	return true;
 }
 
-bool ImportShaderKit( const std::string& id, std::string& savedPath, std::string& title, std::string& err )
+bool ImportShaderKit( const std::string& id, std::string& savedPath, std::string& title, std::string& err, const std::string& previewDir )
 {
 	FetchResult r = Fetch( "GET", "https://shaderkit.com/s/" + id );
 	if( !r.Ok() )
@@ -270,7 +269,7 @@ bool ImportShaderKit( const std::string& id, std::string& savedPath, std::string
 	json bundle;
 	if( !ShaderKitFromHtml( r.body, id, bundle, err ) )
 		return false;
-	return FinishImport( "shaderkit", id, bundle, savedPath, title, err );
+	return FinishImport( "shaderkit", id, bundle, savedPath, title, err, previewDir );
 }
 
 //------------------------------------------------------------------ Shaderoo (index.php?cmd=loaddb)
@@ -289,7 +288,7 @@ std::string ShaderooDecode( const std::string& raw )
 	return s;
 }
 
-bool ImportShaderoo( const std::string& id, std::string& savedPath, std::string& title, std::string& err )
+bool ImportShaderoo( const std::string& id, std::string& savedPath, std::string& title, std::string& err, const std::string& previewDir )
 {
 	FetchResult r = Fetch( "GET", "https://shaderoo.org/index.php?cmd=loaddb&id=" + UrlEncode( id ) );
 	if( !r.Ok() )
@@ -324,11 +323,11 @@ bool ImportShaderoo( const std::string& id, std::string& savedPath, std::string&
 				images[ n ] = "data:application/octet-stream;base64," + Base64( t.body );
 		}
 	json bundle = { { "stfx", 1 }, { "site", "shaderoo" }, { "id", id }, { "url", "https://shaderoo.org/?shader=" + id }, { "scene", scene }, { "images", images } };
-	return FinishImport( "shaderoo", id, bundle, savedPath, title, err );
+	return FinishImport( "shaderoo", id, bundle, savedPath, title, err, previewDir );
 }
 
 //------------------------------------------------------------------ NEORT (api.neort.io, public)
-bool ImportNeort( const std::string& id, std::string& savedPath, std::string& title, std::string& err )
+bool ImportNeort( const std::string& id, std::string& savedPath, std::string& title, std::string& err, const std::string& previewDir )
 {
 	FetchResult r = Fetch( "GET", "https://api.neort.io/v1/art/" + UrlEncode( id ) );
 	if( !r.Ok() )
@@ -352,7 +351,7 @@ bool ImportNeort( const std::string& id, std::string& savedPath, std::string& ti
 		author = a[ "user" ].value( "name", std::string() );
 	json bundle = { { "stfx", 1 }, { "site", "neort" }, { "id", id }, { "url", "https://neort.io/art/" + id },
 					{ "title", a.value( "title", std::string( "NEORT" ) ) }, { "author", author }, { "codes", a.value( "codes", json::array() ) } };
-	return FinishImport( "neort", id, bundle, savedPath, title, err );
+	return FinishImport( "neort", id, bundle, savedPath, title, err, previewDir );
 }
 
 //------------------------------------------------------------------ FragCoord (serveur MCP public : https://fragcoord.xyz/mcp)
@@ -408,7 +407,7 @@ bool McpCall( const std::string& tool, const json& args, json& result, std::stri
 	return true;
 }
 
-bool ImportFragCoord( const std::string& id, std::string& savedPath, std::string& title, std::string& err )
+bool ImportFragCoord( const std::string& id, std::string& savedPath, std::string& title, std::string& err, const std::string& previewDir )
 {
 	json sh;
 	if( !McpCall( "get_shader", { { "slug", id }, { "include_source", true } }, sh, err ) )
@@ -446,7 +445,7 @@ bool ImportFragCoord( const std::string& id, std::string& savedPath, std::string
 		bundle[ "license" ] = sh[ "license" ];
 	else if( sh.contains( "license" ) && sh[ "license" ].is_object() )
 		bundle[ "license" ] = sh[ "license" ].value( "name", sh[ "license" ].value( "spdx", std::string() ) );
-	return FinishImport( "fragcoord", id, bundle, savedPath, title, err );
+	return FinishImport( "fragcoord", id, bundle, savedPath, title, err, previewDir );
 }
 
 //------------------------------------------------------------------ listes
@@ -687,7 +686,10 @@ std::string SiteShaderUrl( const std::string& site, const std::string& id )
 	return {};
 }
 
-bool FetchAndImport( const std::string& site, const std::string& id, std::string& savedPath, std::string& title, std::string& err )
+namespace
+{
+bool FetchImportTo( const std::string& site, const std::string& id, std::string& savedPath, std::string& title, std::string& err,
+					const std::string& previewDir )
 {
 	if( id.empty() )
 	{
@@ -696,35 +698,43 @@ bool FetchAndImport( const std::string& site, const std::string& id, std::string
 	}
 	try
 	{
-		if( site == "shaderkit" ) return ImportShaderKit( id, savedPath, title, err );
-		if( site == "fragcoord" ) return ImportFragCoord( id, savedPath, title, err );
-		if( site == "shaderoo" ) return ImportShaderoo( id, savedPath, title, err );
-		if( site == "neort" ) return ImportNeort( id, savedPath, title, err );
+		if( site == "shaderkit" ) return ImportShaderKit( id, savedPath, title, err, previewDir );
+		if( site == "fragcoord" ) return ImportFragCoord( id, savedPath, title, err, previewDir );
+		if( site == "shaderoo" ) return ImportShaderoo( id, savedPath, title, err, previewDir );
+		if( site == "neort" ) return ImportNeort( id, savedPath, title, err, previewDir );
 	}
 	catch( const std::exception& e )
 	{
 		err = std::string( "erreur : " ) + e.what();
 		return false;
 	}
+	catch( ... )
+	{
+		err = "erreur inattendue";
+		return false;
+	}
 	err = "site non pris en charge : " + site;
 	return false;
+}
+}//namespace
+
+bool FetchAndImport( const std::string& site, const std::string& id, std::string& savedPath, std::string& title, std::string& err )
+{
+	return FetchImportTo( site, id, savedPath, title, err, "" );
 }
 
 bool FetchForPreview( const std::string& site, const std::string& id, std::string& path, std::string& err )
 {
-	t_previewDir = JoinPath( MediaDir(), "web_preview" );
-	std::string cached = JoinPath( t_previewDir, SanitizeFileName( site + "-" + id ) + ".json" );
+	std::string dir    = JoinPath( MediaDir(), "web_preview" );
+	std::string cached = JoinPath( dir, SanitizeFileName( site + "-" + id ) + ".json" );
 	std::vector< uint8_t > probe;
 	if( ReadFileBytes( cached, probe ) && !probe.empty() )
 	{
-		t_previewDir.clear();
 		path = cached;
 		return true;
 	}
 	std::string title;
-	bool ok      = FetchAndImport( site, id, path, title, err );
-	t_previewDir.clear();
-	return ok;
+	return FetchImportTo( site, id, path, title, err, dir );
 }
 
 bool Browse( const std::string& site, const std::string& queryIn, int sortIdx, const std::string& cursor, std::vector< WebEntry >& out,
