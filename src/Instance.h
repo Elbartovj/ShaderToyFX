@@ -20,6 +20,7 @@ struct InstanceShared
 	std::unique_ptr< ShaderDoc > pendingDoc;
 	bool pendingUserInitiated = false;// => met à jour le paramètre "Shader" et les valeurs par défaut
 	bool restartRequested     = false;
+	bool saveDefaultsRequested = false;// valeurs actuelles des sliders -> valeurs par défaut du fichier
 
 	// état exposé au panneau
 	bool busy = false;
@@ -51,6 +52,7 @@ void RequestImportShadered( const SharedPtr& s, const std::string& path );
 void RequestRandom( const SharedPtr& s, const std::string& source );
 void RequestApplyDoc( const SharedPtr& s, ShaderDoc doc, bool userInitiated );
 void RequestRestart( const SharedPtr& s );
+void RequestSaveDefaults( const SharedPtr& s );
 InstanceSnapshot Snapshot( const SharedPtr& s );
 
 // Registre global des instances vivantes

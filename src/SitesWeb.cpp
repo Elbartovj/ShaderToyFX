@@ -168,11 +168,24 @@ bool Between( const std::string& s, const std::string& a, const std::string& b, 
 	return true;
 }
 
+thread_local std::string t_previewDir;// non vide : conversion pour l'aperçu (cache), pas pour la bibliothèque
+
 bool FinishImport( const std::string& site, const std::string& id, const json& bundle, std::string& savedPath, std::string& title, std::string& err )
 {
 	std::string out, siteDir;
 	if( !ConvertBundle( bundle.dump(), out, title, siteDir, err ) )
 		return false;
+	if( !t_previewDir.empty() )
+	{
+		MakeDirs( t_previewDir );
+		savedPath = JoinPath( t_previewDir, SanitizeFileName( site + "-" + id ) + ".json" );
+		if( !WriteFileText( savedPath, out ) )
+		{
+			err = "écriture impossible : " + savedPath;
+			return false;
+		}
+		return true;
+	}
 	return SaveImported( site, id, title, siteDir, out, ".json", savedPath, err );
 }
 
@@ -695,6 +708,23 @@ bool FetchAndImport( const std::string& site, const std::string& id, std::string
 	}
 	err = "site non pris en charge : " + site;
 	return false;
+}
+
+bool FetchForPreview( const std::string& site, const std::string& id, std::string& path, std::string& err )
+{
+	t_previewDir = JoinPath( MediaDir(), "web_preview" );
+	std::string cached = JoinPath( t_previewDir, SanitizeFileName( site + "-" + id ) + ".json" );
+	std::vector< uint8_t > probe;
+	if( ReadFileBytes( cached, probe ) && !probe.empty() )
+	{
+		t_previewDir.clear();
+		path = cached;
+		return true;
+	}
+	std::string title;
+	bool ok      = FetchAndImport( site, id, path, title, err );
+	t_previewDir.clear();
+	return ok;
 }
 
 bool Browse( const std::string& site, const std::string& queryIn, int sortIdx, const std::string& cursor, std::vector< WebEntry >& out,

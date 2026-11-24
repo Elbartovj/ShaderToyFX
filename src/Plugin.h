@@ -38,6 +38,7 @@ enum ParamIndex : unsigned int
 	PT_MODEL0 = PT_USER0 + stfx::kMaxUserParams,// modèles .obj d'un projet SHADERed, remplaçables
 	PT_MODEL1,
 	PT_MODEL_FIT,
+	PT_SAVE_DEFAULTS,// bouton : valeurs actuelles des sliders -> valeurs par défaut du shader
 	PT_COUNT
 };
 
@@ -92,6 +93,8 @@ private:
 	float values[ PT_COUNT ] = {};
 	std::vector< stfx::UserParam > userParams;
 	bool firstShaderApplied = false;
+	bool resetUserAfterApply = false;// après « Save as Default » : sliders remis au milieu (= nouvelle valeur)
+	void SaveCurrentAsDefaults();
 	bool userTouched[ stfx::kMaxUserParams ] = {};// valeur restaurée par Resolume (composition)
 	std::vector< float > fftScratch;
 	char displayBuf[ 64 ] = {};

@@ -286,8 +286,9 @@ static bool ParseJsonDoc( const std::string& text, ShaderDoc& doc, std::string& 
 	return true;
 }
 
-static bool ParseGlslDoc( const std::string& text, const std::string& pathHint, ShaderDoc& doc, std::string& err )
+static bool ParseGlslDoc( const std::string& textIn, const std::string& pathHint, ShaderDoc& doc, std::string& err )
 {
+	const std::string text = sites::FixMainImageShadowing( textIn );
 	// GLSL « main() » (GLSLSandbox, The Book of Shaders, NEORT…) : converti au format Shadertoy
 	if( text.find( "mainImage" ) == std::string::npos && std::regex_search( text, std::regex( R"(\bvoid\s+main\s*\()" ) ) )
 	{

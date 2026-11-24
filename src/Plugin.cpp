@@ -123,6 +123,9 @@ ShaderToyFX::ShaderToyFX()
 		SetParamGroup( i, "Models" );
 		SetParamVisibility( i, false, false );
 	}
+	SetParamInfo( PT_SAVE_DEFAULTS, "Save as Default", FF_TYPE_EVENT, false );
+	SetParamGroup( PT_SAVE_DEFAULTS, "Shader Params" );
+	SetParamVisibility( PT_SAVE_DEFAULTS, false, false );
 
 	for( unsigned int i = 0; i < (unsigned)kMaxUserParams; ++i )
 	{
@@ -349,17 +352,7 @@ void ShaderToyFX::ResetClock()
 void ShaderToyFX::ApplyUserParams( const std::vector< UserParam >& params, bool resetValues, bool keepHostValues )
 {
 	userParams = params;
-	// projets SHADERed : remplacer les modèles .obj
-	SetFileParamInfo( PT_MODEL0, "Model 1", { "obj" }, "" );
-	SetFileParamInfo( PT_MODEL1, "Model 2", { "obj" }, "" );
-	SetParamInfo( PT_MODEL_FIT, "Model Fit", FF_TYPE_BOOLEAN, true );
-	values[ PT_MODEL_FIT ] = 1.0f;
-	for( unsigned int i = PT_MODEL0; i <= PT_MODEL_FIT; ++i )
-	{
-		SetParamGroup( i, "Models" );
-		SetParamVisibility( i, false, false );
-	}
-
+	SetParamVisibility( PT_SAVE_DEFAULTS, !params.empty(), true );
 	for( unsigned int i = 0; i < (unsigned)kMaxUserParams; ++i )
 	{
 		unsigned int idx = PT_USER0 + i;
@@ -377,8 +370,71 @@ void ShaderToyFX::ApplyUserParams( const std::vector< UserParam >& params, bool 
 	}
 }
 
+// Réécrit le fichier du shader : les valeurs actuelles des sliders deviennent ses valeurs par défaut
+void ShaderToyFX::SaveCurrentAsDefaults()
+{
+	std::shared_ptr< const ShaderDoc > cur;
+	{
+		std::lock_guard< std::mutex > lock( shared->m );
+		cur = shared->current;
+	}
+	auto setStatus = [ & ]( const std::string& s ) {
+		std::lock_guard< std::mutex > lock( shared->m );
+		shared->status = s;
+	};
+	if( !cur || cur->params.empty() || userParams.empty() )
+	{
+		setStatus( "Aucun paramètre à enregistrer." );
+		return;
+	}
+	if( cur->IsShadered() )
+	{
+		setStatus( "Projets SHADERed : enregistrement des valeurs par défaut non pris en charge." );
+		return;
+	}
+	ShaderDoc doc = *cur;
+	std::vector< float > real;
+	for( size_t i = 0; i < userParams.size() && i < (size_t)kMaxUserParams; ++i )
+		real.push_back( UserParamValue( userParams[ i ], values[ PT_USER0 + i ] ) );
+	if( RewriteParamDefaults( doc, real ) == 0 )
+	{
+		setStatus( "Aucune déclaration modifiable trouvée dans le code." );
+		return;
+	}
+	std::string ext;
+	std::string text = SerializeDoc( doc, ext );
+	std::string path = doc.sourcePath;
+	bool inRoot      = !path.empty() && ToLower( path ).rfind( ToLower( RootDir() ), 0 ) == 0 && FileExtLower( path ) == ext;
+	if( !inRoot )
+	{
+		MakeDirs( LocalDir() );
+		path = JoinPath( LocalDir(), SanitizeFileName( doc.title.empty() ? std::string( "shader" ) : doc.title ) + ext );
+	}
+	auto reloaded = std::make_unique< ShaderDoc >();
+	std::string err;
+	if( !WriteFileText( path, text ) || !LoadShaderFile( path, *reloaded, err ) )
+	{
+		setStatus( "Enregistrement impossible : " + path + ( err.empty() ? "" : " (" + err + ")" ) );
+		return;
+	}
+	resetUserAfterApply = true;
+	std::lock_guard< std::mutex > lock( shared->m );
+	shared->pendingDoc           = std::move( reloaded );
+	shared->pendingUserInitiated = true;
+	shared->status               = "Valeurs par défaut enregistrées : " + path;
+}
+
 void ShaderToyFX::ApplyPending()
 {
+	bool saveDefaults = false;
+	{
+		std::lock_guard< std::mutex > lock( shared->m );
+		saveDefaults                  = shared->saveDefaultsRequested;
+		shared->saveDefaultsRequested = false;
+	}
+	if( saveDefaults )
+		SaveCurrentAsDefaults();
+
 	std::unique_ptr< ShaderDoc > doc;
 	bool userInitiated = false, restart = false;
 	{
@@ -408,7 +464,8 @@ void ShaderToyFX::ApplyPending()
 						  std::equal( userParams.begin(), userParams.end(), doc->params.begin(), []( const UserParam& a, const UserParam& b ) { return a.name == b.name && a.minV == b.minV && a.maxV == b.maxV; } );
 		// 1er shader d'une instance chargé par Resolume (composition) : on garde les valeurs restaurées
 		bool keepHost = !firstShaderApplied && !userInitiated;
-		ApplyUserParams( doc->params, !sameParams, keepHost );
+		ApplyUserParams( doc->params, !sameParams || resetUserAfterApply, keepHost );
+		resetUserAfterApply = false;
 		firstShaderApplied = true;
 		for( auto& t : userTouched )
 			t = false;
@@ -613,6 +670,9 @@ FFResult ShaderToyFX::SetFloatParameter( unsigned int index, float value )
 		break;
 	case PT_RESTART:
 		RequestRestart( shared );
+		break;
+	case PT_SAVE_DEFAULTS:
+		RequestSaveDefaults( shared );
 		break;
 	default:
 		break;

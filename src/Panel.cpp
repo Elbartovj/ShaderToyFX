@@ -758,6 +758,38 @@ void PollWebJobs()
 	}
 }
 
+void LivePreviewImage( const std::string& pv, float iw, const char* emptyText );
+
+// Aperçu animé d'un résultat : le shader est téléchargé et converti dans le cache (media\web_preview)
+struct WebPreview
+{
+	int state = 0;// 0 en cours, 1 prêt, 2 erreur
+	std::string path, err;
+};
+std::mutex g_webPreviewMutex;
+std::map< std::string, WebPreview > g_webPreviews;
+
+WebPreview RequestWebPreview( const std::string& site, const std::string& id )
+{
+	std::string key = site + ":" + id;
+	std::lock_guard< std::mutex > lock( g_webPreviewMutex );
+	auto it = g_webPreviews.find( key );
+	if( it != g_webPreviews.end() )
+		return it->second;
+	g_webPreviews[ key ] = WebPreview();
+	std::thread( [ site, id, key ] {
+		WebPreview r;
+		r.state = sites::FetchForPreview( site, id, r.path, r.err ) ? 1 : 2;
+		{
+			std::lock_guard< std::mutex > lock( g_webPreviewMutex );
+			g_webPreviews[ key ] = r;
+		}
+		if( HWND hwnd = g_hwnd.load() )
+			PostMessageW( hwnd, WM_STFX_WAKE, 0, 0 );
+	} ).detach();
+	return WebPreview();
+}
+
 struct WebBrowseState
 {
 	std::mutex m;
@@ -924,8 +956,46 @@ void TabSites()
 			sel = &e;
 	if( sel )
 	{
-		if( !sel->thumb.empty() )
-			DrawThumb( std::string( cur.key ) + ":" + sel->id, std::min( ImGui::GetContentRegionAvail().x, ImGui::GetFontSize() * 18 ), sel->thumb );
+		float pw = ImGui::GetContentRegionAvail().x;
+		if( std::string( cur.key ) != "shadered" && g_ui->previewOn )
+		{
+			// aperçu animé (le shader est converti en arrière-plan) ; miniature du site en attendant
+			WebPreview wp = RequestWebPreview( cur.key, sel->id );
+			if( wp.state == 1 )
+			{
+				LivePreviewImage( wp.path, pw, "" );
+				if( ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
+					StartWebImport( cur.key, sel->id, sel->title );
+				Preview::Status st = Preview::GetStatus();
+				if( st.path == wp.path && !st.error.empty() )
+				{
+					ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.45f, 0.45f, 1.0f ) );
+					ImGui::TextWrapped( "%s", st.error.c_str() );
+					ImGui::PopStyleColor();
+				}
+			}
+			else
+			{
+				if( !sel->thumb.empty() )
+					DrawThumb( std::string( cur.key ) + ":" + sel->id, std::min( pw, ImGui::GetFontSize() * 18 ), sel->thumb );
+				else
+				{
+					ImVec2 p0 = ImGui::GetCursorScreenPos();
+					ImGui::GetWindowDrawList()->AddRectFilled( p0, ImVec2( p0.x + pw, p0.y + pw * 9 / 16 ), IM_COL32( 0, 0, 0, 255 ) );
+					ImGui::Dummy( ImVec2( pw, pw * 9 / 16 ) );
+				}
+				if( wp.state == 0 )
+					ImGui::TextDisabled( "Téléchargement de l'aperçu…" );
+				else
+				{
+					ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.45f, 0.45f, 1.0f ) );
+					ImGui::TextWrapped( "Aperçu impossible : %s", wp.err.c_str() );
+					ImGui::PopStyleColor();
+				}
+			}
+		}
+		else if( !sel->thumb.empty() )
+			DrawThumb( std::string( cur.key ) + ":" + sel->id, std::min( pw, ImGui::GetFontSize() * 18 ), sel->thumb );
 		ImGui::TextWrapped( "%s", sel->title.c_str() );
 		ImGui::TextDisabled( "par %s  ·  id %s", sel->author.c_str(), sel->id.c_str() );
 		if( !sel->info.empty() )
@@ -935,6 +1005,7 @@ void TabSites()
 		ImGui::SameLine();
 		if( ImGui::Button( "Voir sur le site" ) )
 			OpenUrl( sites::SiteShaderUrl( cur.key, sel->id ) );
+		ImGui::Checkbox( "Aperçu animé", &g_ui->previewOn );
 		ImGui::Spacing();
 		ImGui::TextDisabled( "Le shader est converti et rangé dans Documents\\ShaderToyFX\\%s.", cur.name );
 		if( std::string( cur.key ) == "neort" )
@@ -1490,6 +1561,43 @@ void FolderEntry( const char* label, const std::string& key, int count )
 	}
 }
 
+// Image animée du shader pv (thread Preview) avec message d'état au centre ; largeur iw, format 16:9
+void LivePreviewImage( const std::string& pv, float iw, const char* emptyText )
+{
+	static const int kRes[ 3 ][ 2 ] = { { 160, 90 }, { 256, 144 }, { 384, 216 } };
+	const int* res = kRes[ std::clamp( g_ui->previewRes, 0, 2 ) ];
+	if( !pv.empty() && g_ui->previewOn )
+		Preview::Request( pv, res[ 0 ], res[ 1 ] );
+	float ih       = iw * 9.0f / 16.0f;
+	ImVec2 p0      = ImGui::GetCursorScreenPos();
+	ImDrawList* dl = ImGui::GetWindowDrawList();
+	dl->AddRectFilled( p0, ImVec2( p0.x + iw, p0.y + ih ), IM_COL32( 0, 0, 0, 255 ) );
+	Preview::Status st = Preview::GetStatus();
+	bool showImage     = !pv.empty() && g_previewSrv && g_previewFrame.path == pv && !( st.path == pv && ( st.compiling || !st.error.empty() ) );
+	if( showImage )
+		ImGui::Image( ImTextureRef( (ImTextureID)(intptr_t)g_previewSrv ), ImVec2( iw, ih ) );
+	else
+		ImGui::Dummy( ImVec2( iw, ih ) );
+	if( showImage && ImGui::BeginItemTooltip() )
+	{
+		ImGui::TextUnformatted( "Paramètres à leur valeur d'origine. Les effets (shaders qui lisent l'entrée\n"
+								"Resolume) sont montrés sur une image de test." );
+		ImGui::EndTooltip();
+	}
+	auto centerText = [ & ]( const char* text, ImU32 col ) {
+		ImVec2 ts = ImGui::CalcTextSize( text, nullptr, false, iw - 16 );
+		dl->AddText( ImGui::GetFont(), ImGui::GetFontSize(), ImVec2( p0.x + ( iw - ts.x ) * 0.5f, p0.y + ( ih - ts.y ) * 0.5f ), col, text, nullptr, iw - 16 );
+	};
+	if( pv.empty() )
+		centerText( emptyText, IM_COL32( 140, 140, 140, 255 ) );
+	else if( !g_ui->previewOn && !showImage )
+		centerText( "Aperçu en pause", IM_COL32( 140, 140, 140, 255 ) );
+	else if( st.path != pv || st.compiling )
+		centerText( "Compilation…", IM_COL32( 200, 200, 200, 255 ) );
+	else if( !st.error.empty() )
+		centerText( "Erreur de compilation", IM_COL32( 255, 110, 110, 255 ) );
+}
+
 // Colonne d'aperçu animé du shader sélectionné
 void PreviewPane( float paneW, float footer )
 {
@@ -1506,41 +1614,10 @@ void PreviewPane( float paneW, float footer )
 
 	static const int kRes[ 3 ][ 2 ] = { { 160, 90 }, { 256, 144 }, { 384, 216 } };
 	const int* res = kRes[ std::clamp( g_ui->previewRes, 0, 2 ) ];
-	if( !pv.empty() && g_ui->previewOn )
-		Preview::Request( pv, res[ 0 ], res[ 1 ] );
-
-	float iw = ImGui::GetContentRegionAvail().x;
-	float ih = iw * 9.0f / 16.0f;
-	ImVec2 p0 = ImGui::GetCursorScreenPos();
-	ImDrawList* dl = ImGui::GetWindowDrawList();
-	dl->AddRectFilled( p0, ImVec2( p0.x + iw, p0.y + ih ), IM_COL32( 0, 0, 0, 255 ) );
-	Preview::Status st = Preview::GetStatus();
-	bool showImage     = !pv.empty() && g_previewSrv && g_previewFrame.path == pv && !( st.path == pv && ( st.compiling || !st.error.empty() ) );
-	if( showImage )
-		ImGui::Image( ImTextureRef( (ImTextureID)(intptr_t)g_previewSrv ), ImVec2( iw, ih ) );
-	else
-		ImGui::Dummy( ImVec2( iw, ih ) );
-	if( showImage && ImGui::BeginItemTooltip() )
-	{
-		ImGui::TextUnformatted( "Paramètres à leur valeur d'origine. Les effets (shaders qui lisent l'entrée\n"
-								"Resolume) sont montrés sur une image de test." );
-		ImGui::EndTooltip();
-	}
+	LivePreviewImage( pv, ImGui::GetContentRegionAvail().x, "Clique un shader" );
 	if( ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) && !pv.empty() )
 		LoadPath( pv );
-	// message au centre de l'image
-	auto centerText = [ & ]( const char* text, ImU32 col ) {
-		ImVec2 ts = ImGui::CalcTextSize( text, nullptr, false, iw - 16 );
-		dl->AddText( ImGui::GetFont(), ImGui::GetFontSize(), ImVec2( p0.x + ( iw - ts.x ) * 0.5f, p0.y + ( ih - ts.y ) * 0.5f ), col, text, nullptr, iw - 16 );
-	};
-	if( pv.empty() )
-		centerText( "Clique un shader", IM_COL32( 140, 140, 140, 255 ) );
-	else if( !g_ui->previewOn && !showImage )
-		centerText( "Aperçu en pause", IM_COL32( 140, 140, 140, 255 ) );
-	else if( st.path != pv || st.compiling )
-		centerText( "Compilation…", IM_COL32( 200, 200, 200, 255 ) );
-	else if( !st.error.empty() )
-		centerText( "Erreur de compilation", IM_COL32( 255, 110, 110, 255 ) );
+	Preview::Status st = Preview::GetStatus();
 
 	if( !pv.empty() )
 	{
@@ -2077,6 +2154,26 @@ void TabEditor( const InstanceSnapshot& snap )
 				ImGui::EndTable();
 			}
 			ImGui::TextDisabled( "Plage personnalisée : ajoute « // min max défaut » en fin de ligne, puis Appliquer. Max %d sliders.", kMaxUserParams );
+			if( !base.params.empty() )
+			{
+				ImGui::BeginDisabled( !t || g_ui->editorDirty );
+				if( ImGui::Button( "Réglages actuels → valeurs par défaut" ) && t )
+				{
+					RequestSaveDefaults( t );
+					g_ui->localDirty = true;
+					Toast( "Valeurs par défaut mises à jour dans le fichier du shader." );
+				}
+				ImGui::EndDisabled();
+				if( ImGui::BeginItemTooltip() )
+				{
+					ImGui::TextUnformatted( "Écrit dans le fichier les valeurs actuelles des sliders de Resolume comme nouvelles valeurs\n"
+											"par défaut (les sliders reviennent au milieu, qui vaut désormais ces valeurs).\n"
+											"Même chose avec le bouton « Save as Default » du groupe Shader Params dans Resolume." );
+					if( g_ui->editorDirty )
+						ImGui::TextUnformatted( "Enregistre ou annule d'abord tes modifications du code." );
+					ImGui::EndTooltip();
+				}
+			}
 		}
 	}
 

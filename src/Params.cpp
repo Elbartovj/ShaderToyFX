@@ -9,6 +9,7 @@
 #include "Util.h"
 #include <regex>
 #include <map>
+#include <sstream>
 #include <set>
 #include <cmath>
 #include <algorithm>
@@ -984,4 +985,138 @@ std::string ApplyParamRewrites( const std::string& code, const std::vector< User
 	}
 	return out;
 }
+
+namespace
+{
+std::string FormatParamNumber( float v, bool isInt )
+{
+	char buf[ 48 ];
+	if( isInt )
+		snprintf( buf, sizeof( buf ), "%d", (int)std::lround( v ) );
+	else
+	{
+		snprintf( buf, sizeof( buf ), "%.6g", v );
+		std::string t = buf;
+		if( t.find_first_of( ".eEn" ) == std::string::npos )
+			t += ".0";
+		return t;
+	}
+	return buf;
+}
+
+std::string RangeComment( const UserParam& p, float v )
+{
+	return " // " + FormatParamNumber( p.minV, p.isInt ) + " " + FormatParamNumber( p.maxV, p.isInt ) + " " + FormatParamNumber( v, p.isInt );
+}
+}//namespace
+
+int RewriteParamDefaults( ShaderDoc& doc, const std::vector< float >& values )
+{
+	// valeurs par déclaration (un vecN regroupe ses composantes)
+	struct Target
+	{
+		const UserParam* p = nullptr;
+		std::vector< float > comps;
+		std::vector< bool > set;
+	};
+	std::map< std::string, Target > targets;
+	for( size_t i = 0; i < doc.params.size() && i < values.size(); ++i )
+	{
+		const UserParam& p = doc.params[ i ];
+		Target& t          = targets[ p.uniform ];
+		t.p                = &p;
+		if( t.comps.empty() )
+		{
+			t.comps.assign( std::max( 1, p.vecSize ), 0.0f );
+			t.set.assign( std::max( 1, p.vecSize ), false );
+		}
+		int k = p.comp < 0 ? 0 : p.comp;
+		if( k < (int)t.comps.size() )
+		{
+			t.comps[ k ] = p.isInt ? std::round( values[ i ] ) : values[ i ];
+			t.set[ k ]   = true;
+		}
+	}
+	int changed = 0;
+	auto rewrite = [ & ]( std::string& code ) {
+		std::vector< std::string > lines;
+		std::stringstream ss( code );
+		std::string l;
+		while( std::getline( ss, l ) )
+			lines.push_back( l );
+		bool endsNl = !code.empty() && code.back() == '\n';
+		for( auto& line : lines )
+		{
+			for( auto& kv : targets )
+			{
+				const std::string& n = kv.first;
+				Target& t            = kv.second;
+				if( line.find( n ) == std::string::npos )
+					continue;
+				std::smatch m;
+				const std::string num = kNum;
+				if( t.p->source == ParamSource::Uniform && t.comps.size() == 1 )
+				{
+					std::regex re( R"x(^([ \t]*uniform[ \t]+(?:(?:highp|mediump|lowp)[ \t]+)?(?:float|int)[ \t]+))x" + n + R"x(([ \t]*;).*$)x" );
+					if( std::regex_match( line, m, re ) )
+					{
+						line = m[ 1 ].str() + n + m[ 2 ].str() + RangeComment( *t.p, t.comps[ 0 ] );
+						++changed;
+					}
+				}
+				else if( t.p->source == ParamSource::Define && t.comps.size() == 1 )
+				{
+					std::regex re( R"x(^([ \t]*#[ \t]*define[ \t]+))x" + n + R"x(([ \t]+\(?[ \t]*)()x" + num + R"x()([fF]?[ \t]*\)?)[ \t]*(?://.*|/\*.*)?$)x" );
+					if( std::regex_match( line, m, re ) )
+					{
+						line = m[ 1 ].str() + n + m[ 2 ].str() + FormatParamNumber( t.comps[ 0 ], t.p->isInt ) + m[ 4 ].str() + RangeComment( *t.p, t.comps[ 0 ] );
+						++changed;
+					}
+				}
+				else if( t.p->source == ParamSource::Const && t.comps.size() == 1 )
+				{
+					std::regex re( R"x(^([ \t]*const[ \t]+(?:(?:highp|mediump|lowp)[ \t]+)?(?:float|int)[ \t]+))x" + n + R"x(([ \t]*=[ \t]*\(?[ \t]*)()x" + num +
+								   R"x()([fF]?[ \t]*\)?[ \t]*;)[ \t]*(?://.*|/\*.*)?$)x" );
+					if( std::regex_match( line, m, re ) )
+					{
+						line = m[ 1 ].str() + n + m[ 2 ].str() + FormatParamNumber( t.comps[ 0 ], t.p->isInt ) + m[ 4 ].str() + RangeComment( *t.p, t.comps[ 0 ] );
+						++changed;
+					}
+				}
+				else if( t.comps.size() > 1 )
+				{
+					// const vecN NOM = vecN( a, b, c ); : composantes remplacées une à une
+					std::regex re( R"x(^([ \t]*const[ \t]+(?:(?:highp|mediump|lowp)[ \t]+)?vec[234][ \t]+))x" + n + R"x([ \t]*=[ \t]*vec[234][ \t]*\(([^;()]*)(\)[ \t]*;.*)$)x" );
+					if( std::regex_match( line, m, re ) )
+					{
+						std::vector< std::string > args;
+						std::stringstream as( m[ 2 ].str() );
+						std::string a;
+						while( std::getline( as, a, ',' ) )
+							args.push_back( a );
+						if( args.size() == 1 && t.comps.size() > 1 )
+							args.assign( t.comps.size(), args[ 0 ] );
+						if( args.size() == t.comps.size() )
+						{
+							std::string joined;
+							for( size_t k = 0; k < args.size(); ++k )
+								joined += ( k ? ", " : "" ) + ( t.set[ k ] ? FormatParamNumber( t.comps[ k ], false ) : Trim( args[ k ] ) );
+							line = m[ 1 ].str() + n + " = vec" + std::to_string( t.comps.size() ) + "( " + joined + " " + m[ 3 ].str();
+							++changed;
+						}
+					}
+				}
+			}
+		}
+		std::string out;
+		for( size_t i = 0; i < lines.size(); ++i )
+			out += lines[ i ] + ( i + 1 < lines.size() || endsNl ? "\n" : "" );
+		code = out;
+	};
+	rewrite( doc.common );
+	for( auto& pass : doc.passes )
+		rewrite( pass.code );
+	return changed;
+}
+
 }//namespace stfx

@@ -155,6 +155,12 @@ void RequestRestart( const SharedPtr& s )
 	s->restartRequested = true;
 }
 
+void RequestSaveDefaults( const SharedPtr& s )
+{
+	std::lock_guard< std::mutex > lock( s->m );
+	s->saveDefaultsRequested = true;
+}
+
 InstanceSnapshot Snapshot( const SharedPtr& s )
 {
 	InstanceSnapshot r;

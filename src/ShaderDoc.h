@@ -140,6 +140,11 @@ void GuessRange( UserParam& p, float v );
 
 // Détecte les paramètres réglables (uniforms, #define et const numériques) -> doc.params
 void ExtractUserParams( ShaderDoc& doc );
+
+// Réécrit le code (Common et passes) pour que la valeur par défaut de chaque paramètre devienne value[ i ]
+// (valeurs réelles, dans l'ordre de doc.params). La plage actuelle est gardée (« // min max défaut »).
+// Retourne le nombre de valeurs modifiées.
+int RewriteParamDefaults( ShaderDoc& doc, const std::vector< float >& values );
 // Réécrit le code pour transformer les #define / const retenus en uniforms (numéros de ligne conservés)
 std::string ApplyParamRewrites( const std::string& code, const std::vector< UserParam >& params );
 // Initialise à zéro les variables locales déclarées sans valeur (« vec3 c; »), comme WebGL/ANGLE sur

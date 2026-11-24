@@ -53,6 +53,7 @@ Sans clé, le bouton **Rechercher** ouvre la recherche dans ton navigateur, et *
 | Inputs | **Input Fit** | Cadrage de l'entrée Resolume dans la sortie : *Étirer* (défaut), *Contenir* (image entière, bandes noires), *Remplir* (rogne les bords), *Pixel 1:1* (taille réelle, centrée). L'entrée est toujours recadrée à la résolution de sortie, donc `fragCoord / iResolution` tombe pile sur l'image, quelle que soit la résolution du clip. |
 | Inputs | **Aspect Fix** | Pour les shaders qui étirent leurs coordonnées par le ratio de l'écran (`uv.x *= iResolution.x / iResolution.y`, fréquent sur Shadertoy avec des textures qui se répètent) : l'entrée Resolume ne remplit alors qu'une partie de l'écran. Coche **Aspect Fix** pour la recaler sur tout l'écran. Ne concerne que les canaux qui reçoivent l'entrée Resolume ou une image choisie. |
 | Inputs | **iChannel0 à 3** (+ *Image*) | Choisit ce qui entre dans chaque iChannel : *Shader (défaut)*, *Entrée Resolume* (le clip/la couche sous l'effet), *Image (fichier)* (un sélecteur d'image apparaît), *Audio FFT* ou *Noir*. Seuls les canaux utilisés par le shader sont affichés, avec leur contenu d'origine, par ex. « iChannel0 (texture) ». Tout canal 2D peut être remplacé, y compris un buffer : choisis *Audio FFT* pour y envoyer le spectre de Resolume. |
+| Shader Params | **Save as Default** | Écrit dans le fichier du shader les valeurs actuelles des sliders comme nouvelles valeurs par défaut (aussi : bouton *Réglages actuels → valeurs par défaut* de l'onglet ÉDITEUR). Les sliders reviennent au milieu, qui vaut désormais ces valeurs. Un shader hors de la bibliothèque est enregistré dans `Local`. Pas pour les projets SHADERed. |
 | Models | **Model 1, Model 2**, **Model Fit** | Projets SHADERed avec des modèles `.obj` : remplace chaque modèle par un `.obj` de ton choix. *Model Fit* (activé par défaut) le recale sur la taille et la position du modèle d'origine. Les `.obj` sans normales reçoivent des normales plates. |
 | Shader Params | jusqu'à 24 sliders | Créés automatiquement à partir du shader : `uniform`, `#define` numériques et constantes globales (voir ci-dessous). Renommés au chargement, masqués s'ils ne servent pas. |
 
@@ -109,7 +110,7 @@ Uniforms disponibles : `iResolution`, `iTime`, `iTimeDelta`, `iFrameRate`, `iFra
 
 Pour ShaderKit, FragCoord, Shaderoo, NEORT et SHADERed, le plugin télécharge le shader lui-même, sans favori ni clé :
 
-- **Onglet AUTRES SITES** : choisis le site, tape une recherche (ou laisse vide pour parcourir), puis double-clique un résultat ou clique **Charger le shader**. Une miniature s'affiche à droite (sauf FragCoord, qui n'en fournit pas).
+- **Onglet AUTRES SITES** : choisis le site, tape une recherche (ou laisse vide pour parcourir), puis double-clique un résultat ou clique **Charger le shader**. Un aperçu animé s'affiche à droite : le shader est converti en arrière-plan dans un cache (`media\web_preview`), sans l'ajouter à ta bibliothèque. La miniature du site s'affiche en attendant (FragCoord n'en fournit pas).
 - **Onglet LIEN** : colle un lien `shaderkit.com/s/…`, `fragcoord.xyz/s/…`, `shaderoo.org/?shader=…`, `neort.io/art/…` ou `shadered.org/view?s=…`, puis **Charger**.
 
 | Site | Accès utilisé | Recherche |

@@ -1034,6 +1034,24 @@ bool ConvertFragCoord( const json& b, json& out, std::string& title, std::string
 	return true;
 }
 
+// Paramètre de mainImage redéclaré dans le corps (« vec2 fragCoord = gl_FragCoord.xy; », export FragCoord) :
+// erreur sur les pilotes OpenGL, donc le paramètre est renommé.
+std::string FixShadowImpl( const std::string& text )
+{
+	std::smatch sig;
+	static const std::regex reSig( R"(void\s+mainImage\s*\(\s*out\s+vec4\s+(\w+)\s*,\s*in\s+vec2\s+(\w+)\s*\))" );
+	if( !std::regex_search( text, sig, reSig ) )
+		return text;
+	std::string body = text.substr( sig.position( 0 ) + sig.length( 0 ) );
+	std::string col = sig[ 1 ], coord = sig[ 2 ];
+	bool rCoord = std::regex_search( body, std::regex( "\\bvec2\\s+" + coord + "\\s*[=;]" ) );
+	bool rCol   = std::regex_search( body, std::regex( "\\bvec4\\s+" + col + "\\s*[=;]" ) );
+	if( !rCoord && !rCol )
+		return text;
+	return text.substr( 0, sig.position( 0 ) ) + "void mainImage( out vec4 " + ( rCol ? std::string( "stfx_fragColorOut" ) : col ) + ", in vec2 " +
+		   ( rCoord ? std::string( "stfx_fragCoordIn" ) : coord ) + " )" + body;
+}
+
 std::string SiteDirName( const std::string& site )
 {
 	if( site == "shaderkit" ) return "ShaderKit";
@@ -1043,6 +1061,8 @@ std::string SiteDirName( const std::string& site )
 	return "Web";
 }
 }//namespace
+
+std::string FixMainImageShadowing( const std::string& text ) { return FixShadowImpl( text ); }
 
 bool ConvertMainStyleGlsl( const std::string& code, const std::string& title, const std::string& author, std::string& shadertoyJson,
 						   std::string& err )
@@ -1160,19 +1180,7 @@ bool ImportDownloadedExport( const std::string& file, std::string& savedPath, st
 				size_t eol = text.find( '\n', a );
 				text.replace( a, ( eol == std::string::npos ? text.size() : eol ) - a, "// @iChannel1 audio\n#define u_audio iChannel1" );
 			}
-			// paramètre de mainImage redéclaré dans le corps (« vec2 fragCoord = gl_FragCoord.xy; ») : on renomme le paramètre
-			std::smatch sig;
-			static const std::regex reSig( R"(void\s+mainImage\s*\(\s*out\s+vec4\s+(\w+)\s*,\s*in\s+vec2\s+(\w+)\s*\))" );
-			if( std::regex_search( text, sig, reSig ) )
-			{
-				std::string body = text.substr( sig.position( 0 ) + sig.length( 0 ) );
-				std::string col = sig[ 1 ], coord = sig[ 2 ];
-				bool rCoord = std::regex_search( body, std::regex( "\\bvec2\\s+" + coord + "\\s*[=;]" ) );
-				bool rCol   = std::regex_search( body, std::regex( "\\bvec4\\s+" + col + "\\s*[=;]" ) );
-				if( rCoord || rCol )
-					text = text.substr( 0, sig.position( 0 ) ) + "void mainImage( out vec4 " + ( rCol ? std::string( "stfx_fragColorOut" ) : col ) +
-						   ", in vec2 " + ( rCoord ? std::string( "stfx_fragCoordIn" ) : coord ) + " )" + body;
-			}
+			text = FixShadowImpl( text );
 			out = text;
 			ext = ".glsl";
 		}

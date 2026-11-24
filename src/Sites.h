@@ -29,6 +29,9 @@ bool ConvertBundle( const std::string& bundleJson, std::string& shadertoyJson, s
 // -> JSON Shadertoy (passe Image, + Buffer A si le shader lit l'image précédente). false si ce n'est pas ce format.
 bool ConvertMainStyleGlsl( const std::string& code, const std::string& title, const std::string& author, std::string& shadertoyJson,
 						   std::string& err );
+// Paramètre de mainImage redéclaré dans le corps : renommé (sinon erreur de compilation)
+std::string FixMainImageShadowing( const std::string& text );
+
 // Enregistre un shader converti dans Documents\ShaderToyFX\<Site>\Titre [site-id].ext
 bool SaveImported( const std::string& site, const std::string& id, const std::string& title, const std::string& siteDir,
 				   const std::string& content, const std::string& ext, std::string& savedPath, std::string& err );
@@ -51,6 +54,9 @@ std::string SiteShaderUrl( const std::string& site, const std::string& id );
 
 // Télécharge le shader (API publique ou page du site), le convertit et l'enregistre. Bloquant : thread de travail.
 bool FetchAndImport( const std::string& site, const std::string& id, std::string& savedPath, std::string& title, std::string& err );
+
+// Même chose pour l'aperçu : converti dans le cache (media\web_preview), hors bibliothèque. Bloquant.
+bool FetchForPreview( const std::string& site, const std::string& id, std::string& path, std::string& err );
 
 struct WebEntry
 {
