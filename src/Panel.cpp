@@ -1,4 +1,5 @@
 #include "Panel.h"
+#include "Recipes.h"
 #include "ShadertoyApi.h"
 #include "ShaderDoc.h"
 #include "Util.h"
@@ -2124,6 +2125,9 @@ struct ImproverUi
 	std::string undoCommon;
 	std::vector< std::string > undoPasses;
 	std::string lastSummary, lastError, lastLog;
+	bool exportFfgl    = false;// « Faire un plugin FFGL » : export automatique après une amélioration réussie
+	bool exportPending = false;
+	uint64_t exportAfterSerial = 0;
 };
 ImproverUi g_impUi;
 
@@ -2389,6 +2393,40 @@ void TabEditor( const InstanceSnapshot& snap )
 				if( t )
 					RequestApplyDoc( t, EditedDoc(), false );
 				Toast( r.compileLog.empty() ? "Shader amélioré par Claude (pas encore enregistré)." : "Résultat de Claude appliqué, mais il ne compile pas." );
+				if( t && g_impUi.exportFfgl && r.compileLog.empty() )
+				{
+					std::lock_guard< std::mutex > lock( t->m );
+					g_impUi.exportAfterSerial = t->buildSerial;
+					g_impUi.exportPending     = true;
+				}
+			}
+		}
+		// export FFGL demandé : une fois la version améliorée compilée par Resolume
+		if( t && g_impUi.exportPending )
+		{
+			bool ready = false, ok = false;
+			std::string kind;
+			{
+				std::lock_guard< std::mutex > lock( t->m );
+				ready = t->buildSerial != g_impUi.exportAfterSerial;
+				ok    = t->lastBuildOk;
+				kind  = t->moduleKind;
+				if( ready )
+					g_exportUi.seenSerial = t->exportSerial;
+			}
+			if( ready )
+			{
+				g_impUi.exportPending = false;
+				std::string name      = Trim( base.title ).substr( 0, 16 );
+				if( name.empty() )
+					name = "Shader";
+				if( ok )
+				{
+					std::string file = JoinPath( standalone::ModuleDir(), SanitizeFileName( "Shader Loader - " + name ) + ".dll" );
+					g_exportUi.waiting = true;
+					RequestExportPlugin( t, name, file, kind == "source", true );
+					Toast( "Export en plugin FFGL « " + name + " »…" );
+				}
 			}
 		}
 		if( ImGui::CollapsingHeader( "Améliorer avec Claude###improve", ImGuiTreeNodeFlags_DefaultOpen ) )
@@ -2402,6 +2440,24 @@ void TabEditor( const InstanceSnapshot& snap )
 				ImGui::GetWindowDrawList()->AddText( ImVec2( r0.x + 6, r0.y + 4 ), IM_COL32( 130, 130, 130, 255 ),
 													 "ex. : plus de contraste, réagit aux basses du son, ajoute des sliders pour la vitesse et la couleur…" );
 			}
+			if( ImGui::SmallButton( "Recette : diffuser selon la texture d'entrée" ) )
+				g_impUi.prompt = recipes::kTextureDiffusion;
+			if( ImGui::BeginItemTooltip() )
+			{
+				ImGui::TextUnformatted( "Remplit la consigne avec la recette « diffusion guidée par la vidéo de Resolume » :\n"
+										"entrée branchée sur la simulation, contours ou luminosité comme guide (EDGES, FOLLOW),\n"
+										"couleurs prises dans la texture (LIVE_COLOR), réglages d'origine gardés.\n"
+										"Marche le mieux avec Claude Desktop, qui peut rebrancher les canaux et ajouter des buffers." );
+				ImGui::EndTooltip();
+			}
+			ImGui::SameLine();
+			ImGui::Checkbox( "Faire un plugin FFGL", &g_impUi.exportFfgl );
+			if( ImGui::BeginItemTooltip() )
+			{
+				ImGui::TextUnformatted( "Une fois l'effet amélioré, il est exporté en plugin FFGL autonome (son nom dans la liste des effets\n"
+										"de Resolume, ses sliders), dans le dossier de Shader Loader. Redémarre Resolume pour le voir." );
+				ImGui::EndTooltip();
+			}
 			// 1) Claude Desktop (abonnement Claude, sans clé API) : extension MCP locale
 			ImGui::AlignTextToFramePadding();
 			ImGui::TextUnformatted( "Avec Claude Desktop :" );
@@ -2412,6 +2468,8 @@ void TabEditor( const InstanceSnapshot& snap )
 								  ( Trim( g_impUi.prompt ).empty() ? std::string( "<ta consigne>" ) : Trim( g_impUi.prompt ) ) +
 								  "\nLis-le avec get_shader, applique la nouvelle version avec update_shader, regarde le rendu avec capture_output. "
 								  "N'enregistre pas sans me demander.";
+				if( g_impUi.exportFfgl )
+					ask += std::string( "\n" ) + recipes::kExportFfgl;
 				ImGui::SetClipboardText( ask.c_str() );
 				Toast( "Demande copiée : colle-la dans Claude Desktop." );
 			}

@@ -2,6 +2,7 @@
 // Lancé par Claude Desktop (extension .mcpb). Relaie les outils vers les instances du plugin dans Resolume
 // par les canaux nommés locaux \\.\pipe\ShaderLoaderBridge-<pid>-<effect|source>-<module>.
 #include <nlohmann/json.hpp>
+#include "../../src/Recipes.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -21,16 +22,16 @@ using json = nlohmann::json;
 
 namespace
 {
-const char* kVersion = "1.25.1";
+const char* kVersion = "1.26.0";
 
 const char* kInstructions = R"(Shader Loader runs Shadertoy-format GLSL shaders as effects and sources inside Resolume Arena (VJ software). These tools read and edit the shader loaded in a Shader Loader instance; changes compile and appear live in Resolume.
 
-Workflow to improve or change an effect: get_shader -> write the complete new code of the passes you change -> update_shader (it compiles first; on errors, fix and call again) -> capture_output to look at the result -> save_shader only when the user is happy (or asks to keep it). revert_shader restores the saved file.
+Workflow to improve or change an effect: get_shader -> write the complete new code of the passes you change -> update_shader (it compiles first; on errors, fix and call again) -> capture_output to look at the result -> save_shader only when the user is happy (or asks to keep it). revert_shader restores the saved file. export_plugin turns the current shader into a standalone FFGL plugin (its own name in Resolume's effect/source list, sliders included) when the user asks for an FFGL plugin.
 
 Shader environment:
 - Desktop OpenGL, GLSL 4.10 core. Shadertoy uniforms: iResolution (vec3), iTime, iTimeDelta, iFrame (int), iMouse (vec4), iDate, iSampleRate, iChannel0..iChannel3, iChannelResolution[4].
 - Every pass defines void mainImage( out vec4 fragColor, in vec2 fragCoord ). Common code is prepended to every pass. Buffer passes render to float textures; a pass reading its own buffer gets the previous frame.
-- Passes and iChannel bindings are fixed (get_shader lists them): do not add, remove or rename passes, and do not change what a channel means. "audio" = Resolume's live FFT in the Shadertoy layout (512x2: y=0.25 spectrum, y=0.75 waveform). "input" = the video under the effect.
+- get_shader lists every pass and what each iChannel is connected to. update_shader can rewire channels per pass ("channels": {"iChannel2": "input"}; values: "input", "buffer A".."buffer D", "audio", "none") and can add passes named "Buffer A".."Buffer D" (send their complete code); existing passes cannot be removed or renamed. "audio" = Resolume's live FFT in the Shadertoy layout (512x2: y=0.25 spectrum, y=0.75 waveform). "input" = the video under the effect.
 - Adjustable controls: a top-level `#define NAME 1.0`, `const float NAME = 1.0;`, `const vec3 NAME = vec3(...)` or `uniform float NAME; // min max default` becomes a slider in Resolume (24 at most). Expose the important new values this way with clear UPPERCASE names.
 - Real time at 1920x1080 / 60 fps on a mid-range GPU: bounded loops, no huge iteration counts.
 - Portable GLSL: initialize every local variable, no implicit int/float conversion (1.0 not 1), declare functions before use, no recursion.
@@ -233,8 +234,8 @@ const json& Tools()
                              "the Resolume sliders, and the current compile status/errors." },
             { "inputSchema", { { "type", "object" }, { "properties", { { "instance", instanceProp } } } } } },
           { { "name", "update_shader" },
-            { "description", "Replace the code of one or more passes (and optionally Common), compile it, and apply it live in Resolume if it compiles. "
-                             "Send the COMPLETE code of each pass you change (not a diff); pass names must match get_shader. Returns compile errors to fix "
+            { "description", "Replace the code of one or more passes (and optionally Common), optionally rewire iChannels or add Buffer passes, compile it, and apply it live in Resolume if it compiles. "
+                             "Send the COMPLETE code of each pass you change (not a diff); pass names must match get_shader (or Buffer A..D to add one). Returns compile errors to fix "
                              "if it does not compile (nothing is applied then). Not saved to disk until save_shader." },
             { "inputSchema",
               { { "type", "object" },
@@ -245,8 +246,14 @@ const json& Tools()
                       { { "type", "array" },
                         { "items",
                           { { "type", "object" },
-                            { "properties", { { "name", { { "type", "string" } } }, { "code", { { "type", "string" } } } } },
-                            { "required", json::array( { "name", "code" } ) } } } } } } },
+                            { "properties",
+                              { { "name", { { "type", "string" }, { "description", "Pass name from get_shader, or \"Buffer A\"..\"Buffer D\" to add a pass." } } },
+                                { "code", { { "type", "string" }, { "description", "Complete code of the pass (omit to only rewire channels)." } } },
+                                { "channels",
+                                  { { "type", "object" },
+                                    { "description", "Optional rewiring, e.g. {\"iChannel2\": \"input\"}. Values: input (Resolume video), buffer A..buffer D, audio, none." },
+                                    { "additionalProperties", { { "type", "string" } } } } } } },
+                            { "required", json::array( { "name" } ) } } } } } } },
                 { "required", json::array( { "passes" } ) } } } },
           { { "name", "capture_output" },
             { "description", "Take a picture of what the instance currently renders in Resolume (PNG, up to 640 px wide), to check the result visually. "
@@ -258,6 +265,17 @@ const json& Tools()
             { "inputSchema",
               { { "type", "object" },
                 { "properties", { { "instance", instanceProp }, { "new_name", { { "type", "string" }, { "description", "Optional name for a new file." } } } } } } } },
+          { { "name", "export_plugin" },
+            { "description", "Export the shader currently applied in the instance as a standalone FFGL plugin (.dll) next to Shader Loader, so it appears in "
+                             "Resolume under its own name with its sliders (current slider values become its defaults). Resolume must be restarted to list it. "
+                             "The clip/layer must be playing." },
+            { "inputSchema",
+              { { "type", "object" },
+                { "properties",
+                  { { "instance", instanceProp },
+                    { "name", { { "type", "string" }, { "description", "Plugin name shown in Resolume (16 characters max)." } } },
+                    { "type", { { "type", "string" }, { "enum", json::array( { "effect", "source" } ) }, { "description", "Default: same as the instance." } } } } },
+                { "required", json::array( { "name" } ) } } } },
           { { "name", "revert_shader" },
             { "description", "Reload the shader from its saved file, discarding unsaved changes." },
             { "inputSchema", { { "type", "object" }, { "properties", { { "instance", instanceProp } } } } } } } );
@@ -299,6 +317,13 @@ json CallTool( const std::string& name, const json& args )
 	}
 	else if( name == "save_shader" )
 		res = CallBridge( args, { { "cmd", "save" }, { "new_name", args.value( "new_name", std::string() ) } } );
+	else if( name == "export_plugin" )
+	{
+		json req = { { "cmd", "export" }, { "name", args.value( "name", std::string() ) } };
+		if( args.contains( "type" ) )
+			req[ "type" ] = args[ "type" ];
+		res = CallBridge( args, req );
+	}
 	else if( name == "revert_shader" )
 		res = CallBridge( args, { { "cmd", "revert" } } );
 	else if( name == "capture_output" )
@@ -366,21 +391,38 @@ int main()
 			else if( method == "tools/call" )
 				result = CallTool( params.value( "name", std::string() ), params.value( "arguments", json::object() ) );
 			else if( method == "prompts/list" )
-				result = { { "prompts",
+			{
+				json ffglArg = { { "name", "plugin_ffgl" }, { "description", "« oui » pour exporter aussi en plugin FFGL" }, { "required", false } };
+				result       = { { "prompts",
 							 json::array( { { { "name", "ameliorer_effet" },
 											  { "title", "Améliorer l'effet Shader Loader" },
 											  { "description", "Améliore le shader chargé dans Resolume selon une consigne." },
-											  { "arguments", json::array( { { { "name", "consigne" }, { "description", "Ce qu'il faut changer" }, { "required", true } } } ) } } } ) } };
+											  { "arguments", json::array( { { { "name", "consigne" }, { "description", "Ce qu'il faut changer" }, { "required", true } }, ffglArg } ) } },
+											{ { "name", "diffuser_texture" },
+											  { "title", "Diffuser selon la texture d'entrée" },
+											  { "description", "Adapte l'effet chargé pour qu'il se diffuse en suivant la vidéo de Resolume (contours, couleurs)." },
+											  { "arguments", json::array( { { { "name", "precisions" }, { "description", "Précisions facultatives" }, { "required", false } }, ffglArg } ) } } } ) } };
+			}
 			else if( method == "prompts/get" )
 			{
-				std::string c = params.value( "arguments", json::object() ).value( "consigne", std::string() );
-				result        = { { "messages",
-                             json::array( { { { "role", "user" },
-                                              { "content",
-                                                { { "type", "text" },
-                                                  { "text", "Améliore l'effet chargé dans Shader Loader (Resolume) : " + c +
-                                                                "\nLis-le avec get_shader, applique la nouvelle version avec update_shader (corrige s'il ne compile pas), "
-                                                                "regarde le rendu avec capture_output, puis résume ce que tu as changé. N'enregistre pas sans me demander." } } } } } ) } };
+				json a        = params.value( "arguments", json::object() );
+				std::string n = params.value( "name", std::string( "ameliorer_effet" ) );
+				std::string ffgl = a.value( "plugin_ffgl", std::string() );
+				bool wantFfgl    = !ffgl.empty() && ( ffgl[ 0 ] == 'o' || ffgl[ 0 ] == 'O' || ffgl[ 0 ] == 'y' || ffgl[ 0 ] == 'Y' );
+				std::string ask;
+				if( n == "diffuser_texture" )
+				{
+					std::string extra = a.value( "precisions", std::string() );
+					ask = std::string( "Améliore l'effet chargé dans Shader Loader (Resolume).\n" ) + stfx::recipes::kTextureDiffusion +
+						  ( extra.empty() ? "" : "\nPrécisions : " + extra );
+				}
+				else
+					ask = "Améliore l'effet chargé dans Shader Loader (Resolume) : " + a.value( "consigne", std::string() );
+				ask += "\nLis-le avec get_shader, applique la nouvelle version avec update_shader (corrige s'il ne compile pas), "
+					   "regarde le rendu avec capture_output, puis résume ce que tu as changé. N'enregistre pas sans me demander.";
+				if( wantFfgl )
+					ask += std::string( "\n" ) + stfx::recipes::kExportFfgl;
+				result = { { "messages", json::array( { { { "role", "user" }, { "content", { { "type", "text" }, { "text", ask } } } } } ) } };
 			}
 			else if( method == "resources/list" )
 				result = { { "resources", json::array() } };

@@ -739,6 +739,232 @@ std::string SerializeDoc( const ShaderDoc& doc, std::string& extension )
 	return img ? img->code : std::string();
 }
 
+//------------------------------------------------------------------ modification (code, canaux, passes)
+namespace
+{
+json ChannelJson( const ChannelDesc& c, int ch, const std::vector< int >& bufferIds )
+{
+	json smp = { { "filter", c.filter == Filter::Nearest ? "nearest" : ( c.filter == Filter::Mipmap ? "mipmap" : "linear" ) },
+				 { "wrap", c.repeat ? "repeat" : "clamp" },
+				 { "vflip", c.vflip ? "true" : "false" } };
+	switch( c.kind )
+	{
+	case ChannelKind::Input: return { { "channel", ch }, { "ctype", "video" }, { "src", "" }, { "sampler", smp } };
+	case ChannelKind::Audio: return { { "channel", ch }, { "ctype", "music" }, { "src", "" }, { "sampler", smp } };
+	case ChannelKind::Keyboard: return { { "channel", ch }, { "ctype", "keyboard" }, { "src", "" }, { "sampler", smp } };
+	case ChannelKind::Texture: return { { "channel", ch }, { "ctype", "texture" }, { "src", c.src }, { "sampler", smp } };
+	case ChannelKind::Cubemap: return { { "channel", ch }, { "ctype", "cubemap" }, { "src", c.src }, { "sampler", smp } };
+	case ChannelKind::Volume: return { { "channel", ch }, { "ctype", "volume" }, { "src", c.src }, { "sampler", smp } };
+	case ChannelKind::Buffer:
+		if( c.buffer >= 0 && c.buffer < 4 )
+			return { { "channel", ch }, { "id", bufferIds[ c.buffer ] }, { "ctype", "buffer" },
+					 { "src", "/media/previz/buffer0" + std::to_string( c.buffer ) + ".png" }, { "sampler", smp } };
+		return nullptr;
+	default: return nullptr;
+	}
+}
+
+// JSON Shadertoy équivalent à un document chargé depuis un .glsl
+std::string DocToJson( const ShaderDoc& doc )
+{
+	std::vector< int > ids = { 257, 258, 259, 260 };
+	json rp                = json::array();
+	if( !doc.common.empty() )
+		rp.push_back( { { "type", "common" }, { "name", "Common" }, { "code", doc.common }, { "inputs", json::array() }, { "outputs", json::array() } } );
+	for( auto& p : doc.passes )
+	{
+		json in = json::array();
+		for( int i = 0; i < 4; ++i )
+		{
+			json c = ChannelJson( p.ch[ i ], i, ids );
+			if( !c.is_null() )
+				in.push_back( c );
+		}
+		json out = json::array();
+		if( p.isImage )
+			out.push_back( { { "id", "img" }, { "channel", 0 } } );
+		else if( p.bufferIndex >= 0 && p.bufferIndex < 4 )
+			out.push_back( { { "id", ids[ p.bufferIndex ] }, { "channel", 0 } } );
+		rp.push_back( { { "type", p.isImage ? "image" : "buffer" }, { "name", p.name }, { "code", p.code }, { "inputs", in }, { "outputs", out } } );
+	}
+	json j = { { "ver", "0.1" },
+			   { "info", { { "id", doc.id }, { "name", doc.title }, { "username", doc.author }, { "description", doc.description } } },
+			   { "renderpass", rp } };
+	return j.dump();
+}
+}//namespace
+
+bool ApplyDocEdits( ShaderDoc& doc, const std::string* common, const std::vector< PassEdit >& edits, std::string& err )
+{
+	if( doc.IsShadered() )
+	{
+		err = "les projets SHADERed / Godot ne sont pas modifiables ainsi";
+		return false;
+	}
+	bool structural = false;
+	for( auto& e : edits )
+	{
+		bool exists = false;
+		for( auto& p : doc.passes )
+			exists = exists || p.name == e.name;
+		if( !exists || !e.channels.empty() )
+			structural = true;
+	}
+	// cas simple : seulement du code
+	if( !structural )
+	{
+		if( common )
+			doc.common = *common;
+		for( auto& e : edits )
+			for( auto& p : doc.passes )
+				if( p.name == e.name && e.hasCode )
+					p.code = e.code;
+		return true;
+	}
+
+	json j = json::parse( doc.rawJson.empty() ? DocToJson( doc ) : doc.rawJson, nullptr, false );
+	if( j.is_discarded() || !j.contains( "renderpass" ) || !j[ "renderpass" ].is_array() )
+	{
+		err = "structure du shader illisible";
+		return false;
+	}
+	json& rp = j[ "renderpass" ];
+	auto findPass = [ & ]( const std::string& name ) -> int {
+		for( int i = 0; i < (int)rp.size(); ++i )
+		{
+			std::string type = ToLower( JStr( rp[ i ], "type" ) );
+			if( ( type == "image" && name == "Image" ) || ( type == "buffer" && JStr( rp[ i ], "name" ) == name ) )
+				return i;
+		}
+		return -1;
+	};
+	auto letterOf = []( const std::string& name ) -> int {
+		std::string n = ToLower( Trim( name ) );
+		if( n.size() == 8 && n.rfind( "buffer ", 0 ) == 0 && n[ 7 ] >= 'a' && n[ 7 ] <= 'd' )
+			return n[ 7 ] - 'a';
+		return -1;
+	};
+	// passes ajoutées (Buffer A..D)
+	for( auto& e : edits )
+		if( findPass( e.name ) < 0 )
+		{
+			int l = letterOf( e.name );
+			if( l < 0 )
+			{
+				err = "passe inconnue : " + e.name + " (seuls Buffer A, Buffer B, Buffer C et Buffer D peuvent être ajoutés)";
+				return false;
+			}
+			if( !e.hasCode )
+			{
+				err = "le code de la nouvelle passe " + e.name + " est manquant";
+				return false;
+			}
+			std::string nm = std::string( "Buffer " ) + char( 'A' + l );
+			// les buffers s'exécutent avant l'image : insérée avant la passe Image
+			int at = findPass( "Image" );
+			json np = { { "type", "buffer" }, { "name", nm }, { "code", "" }, { "inputs", json::array() },
+						{ "outputs", json::array( { { { "id", 257 + l }, { "channel", 0 } } } ) } };
+			rp.insert( rp.begin() + ( at < 0 ? (int)rp.size() : at ), np );
+		}
+	// identifiants de sortie des buffers (par lettre)
+	std::vector< int > ids = { 257, 258, 259, 260 };
+	for( auto& p : rp )
+		if( ToLower( JStr( p, "type" ) ) == "buffer" )
+		{
+			int l = letterOf( JStr( p, "name" ) );
+			if( l >= 0 && p.contains( "outputs" ) && p[ "outputs" ].is_array() && !p[ "outputs" ].empty() && p[ "outputs" ][ 0 ].contains( "id" ) )
+			{
+				auto& id = p[ "outputs" ][ 0 ][ "id" ];
+				if( id.is_number_integer() )
+					ids[ l ] = id.get< int >();
+				else
+				{
+					std::string sid = IdToString( id );
+					if( !sid.empty() && std::all_of( sid.begin(), sid.end(), ::isdigit ) )
+						ids[ l ] = std::stoi( sid );
+				}
+			}
+		}
+	if( common )
+	{
+		bool has = false;
+		for( auto& p : rp )
+			if( ToLower( JStr( p, "type" ) ) == "common" )
+			{
+				p[ "code" ] = *common;
+				has         = true;
+			}
+		if( !has && !Trim( *common ).empty() )
+			rp.insert( rp.begin(), json{ { "type", "common" }, { "name", "Common" }, { "code", *common }, { "inputs", json::array() }, { "outputs", json::array() } } );
+	}
+	for( auto& e : edits )
+	{
+		json& p = rp[ findPass( e.name ) ];
+		if( e.hasCode )
+			p[ "code" ] = e.code;
+		if( !p.contains( "inputs" ) || !p[ "inputs" ].is_array() )
+			p[ "inputs" ] = json::array();
+		for( auto& [ ch, specIn ] : e.channels )
+		{
+			if( ch < 0 || ch > 3 )
+			{
+				err = "canal invalide (0 à 3)";
+				return false;
+			}
+			std::string spec = ToLower( Trim( specIn ) );
+			if( spec == "keep" || spec.empty() )
+				continue;
+			ChannelDesc c;
+			if( spec == "input" || spec == "video" || spec == "entrée" )
+				c.kind = ChannelKind::Input;
+			else if( spec == "audio" || spec == "fft" )
+				c.kind = ChannelKind::Audio;
+			else if( spec == "none" || spec == "black" || spec == "nothing" )
+				c.kind = ChannelKind::None;
+			else if( letterOf( spec ) >= 0 )
+			{
+				c.kind   = ChannelKind::Buffer;
+				c.buffer = letterOf( spec );
+				if( findPass( std::string( "Buffer " ) + char( 'A' + c.buffer ) ) < 0 )
+				{
+					err = e.name + " iChannel" + std::to_string( ch ) + " : " + specIn + " n'existe pas (ajoute la passe)";
+					return false;
+				}
+			}
+			else
+			{
+				err = "branchement inconnu « " + specIn + " » (input, buffer A..D, audio, none)";
+				return false;
+			}
+			json kept = json::array();
+			for( auto& in : p[ "inputs" ] )
+				if( in.value( "channel", -1 ) != ch )
+					kept.push_back( in );
+			json nj = ChannelJson( c, ch, ids );
+			if( !nj.is_null() )
+				kept.push_back( nj );
+			p[ "inputs" ] = kept;
+		}
+	}
+
+	ShaderDoc nd;
+	if( !ParseShaderSource( j.dump(), doc.sourcePath, nd, err ) )
+		return false;
+	nd.sourcePath = doc.sourcePath;
+	if( !doc.title.empty() )
+		nd.title = doc.title;
+	// images déjà chargées : reprises telles quelles
+	for( auto& np : nd.passes )
+		for( auto& op : doc.passes )
+			if( op.name == np.name )
+				for( int i = 0; i < 4; ++i )
+					if( !np.ch[ i ].image && op.ch[ i ].image && np.ch[ i ].kind == op.ch[ i ].kind && np.ch[ i ].src == op.ch[ i ].src )
+						np.ch[ i ].image = op.ch[ i ].image;
+	ResolveMedia( nd, false );
+	doc = std::move( nd );
+	return true;
+}
+
 ShaderDoc DefaultDoc( bool isSource )
 {
 	ShaderDoc d;

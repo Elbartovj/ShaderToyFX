@@ -4,6 +4,7 @@
 // compiler, enregistrer et capturer les shaders des instances. Une requête JSON par connexion, une réponse JSON.
 #include "Bridge.h"
 #include "Claude.h"
+#include "Export.h"
 #include "Instance.h"
 #include "Util.h"
 
@@ -152,26 +153,33 @@ json Handle( const json& req )
 		if( !snap.current || snap.current->IsShadered() )
 			return { { "ok", false }, { "error", "aucun shader modifiable dans cette instance" } };
 		ShaderDoc doc = *snap.current;
-		if( req.contains( "common" ) && req[ "common" ].is_string() )
-			doc.common = req[ "common" ].get< std::string >();
-		int changed = 0;
-		std::string unknown;
+		std::string common;
+		bool hasCommon = req.contains( "common" ) && req[ "common" ].is_string();
+		if( hasCommon )
+			common = req[ "common" ].get< std::string >();
+		std::vector< PassEdit > edits;
 		for( auto& p : req.value( "passes", json::array() ) )
 		{
-			std::string name = p.value( "name", std::string() );
-			bool found       = false;
-			for( auto& dp : doc.passes )
-				if( dp.name == name )
+			PassEdit e;
+			e.name = p.value( "name", std::string() );
+			if( p.contains( "code" ) && p[ "code" ].is_string() )
+			{
+				e.hasCode = true;
+				e.code    = p[ "code" ].get< std::string >();
+			}
+			if( p.contains( "channels" ) && p[ "channels" ].is_object() )
+				for( auto& kv : p[ "channels" ].items() )
 				{
-					dp.code = p.value( "code", dp.code );
-					found   = true;
-					++changed;
+					std::string k = ToLower( kv.key() );
+					int ch        = k.empty() ? -1 : k.back() - '0';
+					if( kv.value().is_string() )
+						e.channels.push_back( { ch, kv.value().get< std::string >() } );
 				}
-			if( !found )
-				unknown += ( unknown.empty() ? "" : ", " ) + name;
+			edits.push_back( e );
 		}
-		if( !unknown.empty() )
-			return { { "ok", false }, { "error", "passes inconnues : " + unknown + " (les passes existantes ne peuvent pas être renommées ni ajoutées)" } };
+		std::string editErr;
+		if( !ApplyDocEdits( doc, hasCommon ? &common : nullptr, edits, editErr ) )
+			return { { "ok", false }, { "error", editErr }, { "applied", false } };
 		doc.warnings.clear();
 		std::string log = claude::CheckCompiles( doc );
 		if( !log.empty() )
@@ -234,6 +242,43 @@ json Handle( const json& req )
 		RequestLoadFile( s, snap.current->sourcePath, false );
 		WaitBuild( s, serial, 8000 );
 		return { { "ok", true }, { "file", snap.current->sourcePath } };
+	}
+
+	if( cmd == "export" )
+	{
+		if( !snap.current || snap.current->IsShadered() )
+			return { { "ok", false }, { "error", "rien à exporter (projet SHADERed / Godot ou aucun shader)" } };
+		std::string name = Trim( req.value( "name", snap.current->title ) ).substr( 0, 16 );
+		if( name.empty() )
+			name = "Shader";
+		bool source;
+		{
+			std::lock_guard< std::mutex > lock( s->m );
+			source = req.value( "type", s->moduleKind ) == "source";
+		}
+		std::string file = JoinPath( standalone::ModuleDir(), SanitizeFileName( "Shader Loader - " + name ) + ".dll" );
+		uint64_t serial;
+		{
+			std::lock_guard< std::mutex > lock( s->m );
+			serial = s->exportSerial;
+		}
+		RequestExportPlugin( s, name, file, source, req.value( "use_current_values", true ) );
+		auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds( 30000 );
+		while( std::chrono::steady_clock::now() < end )
+		{
+			{
+				std::lock_guard< std::mutex > lock( s->m );
+				if( s->exportSerial != serial )
+				{
+					if( !s->exportOk )
+						return { { "ok", false }, { "error", s->exportResult } };
+					return { { "ok", true }, { "file", file }, { "plugin_name", name }, { "type", source ? "source" : "effect" },
+							 { "note", "Redémarre Resolume pour voir le nouveau plugin dans la liste des " + std::string( source ? "sources" : "effets" ) + "." } };
+				}
+			}
+			std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+		}
+		return { { "ok", false }, { "error", "l'export n'a pas démarré : le clip de cette instance doit jouer dans Resolume" } };
 	}
 
 	if( cmd == "capture" )

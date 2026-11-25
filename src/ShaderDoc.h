@@ -122,6 +122,17 @@ struct ShaderDoc
 	int BufferCount() const;
 };
 
+// Modification d'un shader (pont Claude Desktop, améliorateur) : code, branchement des canaux, passes ajoutées
+struct PassEdit
+{
+	std::string name;// "Image", "Buffer A".."Buffer D" (un buffer absent est ajouté)
+	bool hasCode = false;
+	std::string code;
+	std::vector< std::pair< int, std::string > > channels;// (0..3, "input" | "buffer A".."buffer D" | "audio" | "none")
+};
+// common : nouveau code Common (nullptr = inchangé). Faux + err si une consigne est invalide.
+bool ApplyDocEdits( ShaderDoc& doc, const std::string* common, const std::vector< PassEdit >& edits, std::string& err );
+
 // Analyse un texte (JSON Shadertoy ou GLSL "mainImage") -> ShaderDoc (sans médias)
 bool ParseShaderSource( const std::string& text, const std::string& pathHint, ShaderDoc& doc, std::string& err );
 

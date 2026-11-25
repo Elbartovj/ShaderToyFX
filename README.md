@@ -169,10 +169,13 @@ Claude utilise alors ces outils de l'extension :
 |---|---|
 | `list_instances` | Instances Shader Loader ouvertes dans Resolume (E1, E2… effets ; S1… sources) |
 | `get_shader` | Code des passes, branchement des iChannels, sliders, erreurs |
-| `update_shader` | Compile le nouveau code ; s'il compile, il est appliqué en direct, sinon les erreurs reviennent à Claude |
+| `update_shader` | Compile le nouveau code ; s'il compile, il est appliqué en direct, sinon les erreurs reviennent à Claude. Peut aussi rebrancher les iChannels (entrée vidéo, buffers, audio) et ajouter des passes Buffer A à D |
 | `capture_output` | Image du rendu actuel (le clip doit jouer), pour que Claude vérifie le résultat |
 | `save_shader` | Enregistre dans la bibliothèque (ou sous un nouveau nom) |
 | `revert_shader` | Recharge la version enregistrée |
+| `export_plugin` | Exporte le shader en plugin FFGL autonome (nom propre dans Resolume, sliders inclus) |
+
+**Recettes en un clic.** Dans l'ÉDITEUR, *Recette : diffuser selon la texture d'entrée* remplit la consigne pour adapter un effet (croissance, diffusion, particules…) à la vidéo de Resolume : l'entrée guide la diffusion (contours ou luminosité, réglages `EDGES` et `FOLLOW`) et les couleurs viennent de la texture. Dans Claude Desktop, la même recette est proposée dans le menu **+** de la conversation (prompt `diffuser_texture` de l'extension). Coche **Faire un plugin FFGL** pour que l'effet amélioré soit exporté directement en plugin.
 
 Tout passe par un canal local entre Claude Desktop et Resolume sur ton ordinateur ; rien n'est enregistré sans `save_shader`. Pas pour les projets SHADERed ni les shaders Godot.
 
